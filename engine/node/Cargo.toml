@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 sagebrush-modsym = { path = "../modsym" }
+sagebrush-ap = { path = "../ap" }
 rayon = "1.10"
 num-bigint = "0.4"
 napi = { version = "2", default-features = false, features = ["napi6"] }

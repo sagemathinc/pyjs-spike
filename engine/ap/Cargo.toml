@@ -1,0 +1,12 @@
+[package]
+name = "sagebrush-ap"
+version = "0.1.0"
+edition = "2021"
+description = "Traces of Frobenius a_p of elliptic curves over Q, for all primes up to a bound"
+
+[features]
+default = ["parallel"]
+parallel = ["dep:rayon"]
+
+[dependencies]
+rayon = { version = "1.10", optional = true }

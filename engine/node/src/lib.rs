@@ -172,3 +172,49 @@ pub fn estimate(n: u32, q: u32) -> Result<Estimate> {
         seconds_exact: e.seconds_exact,
     })
 }
+
+// ---- ap: traces of Frobenius of elliptic curves ----
+
+fn curve(a: Vec<i64>) -> Result<sagebrush_ap::EllipticCurve> {
+    let a: [i64; 5] = a.try_into().map_err(|_| err("a curve is [a1, a2, a3, a4, a6]".into()))?;
+    sagebrush_ap::EllipticCurve::new(a).map_err(err)
+}
+
+/// a_p of y^2 + a1 xy + a3 y = x^3 + a2 x^2 + a4 x + a6, or null if p divides the discriminant.
+#[napi(namespace = "ap")]
+pub fn ap(a: Vec<i64>, p: i64) -> Result<Option<i64>> {
+    if p < 2 || !sagebrush_modsym::exact::is_prime(p as u64) {
+        return Err(err(format!("p = {} must be a prime", p)));
+    }
+    Ok(curve(a)?.ap(p as u64))
+}
+
+#[napi(object)]
+pub struct ApList {
+    pub primes: Vec<i64>,
+    /// a_p, or null at primes dividing the discriminant.
+    pub ap: Vec<Option<i64>>,
+}
+
+/// a_p for all primes p <= n, in parallel.
+#[napi(namespace = "ap")]
+pub fn aplist(a: Vec<i64>, n: i64, threads: Option<u32>) -> Result<ApList> {
+    let e = curve(a)?;
+    let r = run(threads, || sagebrush_ap::aplist(&e, n as u64));
+    Ok(ApList { primes: r.iter().map(|x| x.0 as i64).collect(), ap: r.iter().map(|x| x.1).collect() })
+}
+
+#[napi(object)]
+pub struct Moments {
+    pub count: f64,
+    /// mean((a_p^2 / p)^k) for k = 1..kmax.
+    pub moments: Vec<f64>,
+}
+
+/// Sato-Tate moments over the good primes p <= n.
+#[napi(namespace = "ap")]
+pub fn moments(a: Vec<i64>, n: i64, kmax: Option<u32>, threads: Option<u32>) -> Result<Moments> {
+    let e = curve(a)?;
+    let (count, moments) = run(threads, || sagebrush_ap::moments(&e, n as u64, kmax.unwrap_or(4) as usize));
+    Ok(Moments { count: count as f64, moments })
+}

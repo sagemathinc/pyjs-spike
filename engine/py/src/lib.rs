@@ -114,6 +114,46 @@ fn estimate<'py>(py: Python<'py>, n: u64, q: u64) -> PyResult<Bound<'py, PyDict>
     Ok(d)
 }
 
+// ---- sagebrush.ap: traces of Frobenius of elliptic curves ----
+
+fn curve(a: Vec<i64>) -> PyResult<sagebrush_ap::EllipticCurve> {
+    let a: [i64; 5] = a.try_into().map_err(|_| PyValueError::new_err("a curve is [a1, a2, a3, a4, a6]"))?;
+    sagebrush_ap::EllipticCurve::new(a).map_err(err)
+}
+
+/// a_p of y^2 + a1 xy + a3 y = x^3 + a2 x^2 + a4 x + a6, or None if p divides the discriminant.
+#[pyfunction]
+fn ap(a: Vec<i64>, p: u64) -> PyResult<Option<i64>> {
+    if p < 2 || !sagebrush_modsym::exact::is_prime(p) || p >= 1 << 62 {
+        return Err(PyValueError::new_err(format!("p = {} must be a prime below 2^62", p)));
+    }
+    Ok(curve(a)?.ap(p))
+}
+
+/// [(p, a_p)] for all primes p <= n (a_p None at bad primes), in parallel.
+#[pyfunction]
+#[pyo3(signature = (a, n, threads=0))]
+fn aplist(py: Python<'_>, a: Vec<i64>, n: u64, threads: usize) -> PyResult<Vec<(u64, Option<i64>)>> {
+    let e = curve(a)?;
+    Ok(run(py, threads, || sagebrush_ap::aplist(&e, n)))
+}
+
+/// aplist for many curves, in parallel over curves.
+#[pyfunction]
+#[pyo3(signature = (curves, n, threads=0))]
+fn aplist_many(py: Python<'_>, curves: Vec<Vec<i64>>, n: u64, threads: usize) -> PyResult<Vec<Vec<(u64, Option<i64>)>>> {
+    let es = curves.into_iter().map(curve).collect::<PyResult<Vec<_>>>()?;
+    Ok(run(py, threads, || sagebrush_ap::aplist_many(&es, n)))
+}
+
+/// (number of good primes p <= n, [mean (a_p^2/p)^k for k = 1..kmax]): Sato-Tate moments.
+#[pyfunction]
+#[pyo3(signature = (a, n, kmax=4, threads=0))]
+fn moments(py: Python<'_>, a: Vec<i64>, n: u64, kmax: usize, threads: usize) -> PyResult<(u64, Vec<f64>)> {
+    let e = curve(a)?;
+    Ok(run(py, threads, || sagebrush_ap::moments(&e, n, kmax)))
+}
+
 /// The native extension, `sagebrush._native`; each engine is a submodule,
 /// re-exported by the pure-Python package (python/sagebrush).
 #[pymodule]
@@ -125,5 +165,11 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     modsym.add_function(wrap_pyfunction!(level_data, &modsym)?)?;
     modsym.add_function(wrap_pyfunction!(commute, &modsym)?)?;
     modsym.add_function(wrap_pyfunction!(estimate, &modsym)?)?;
-    m.add_submodule(&modsym)
+    m.add_submodule(&modsym)?;
+    let apm = PyModule::new(m.py(), "ap")?;
+    apm.add_function(wrap_pyfunction!(ap, &apm)?)?;
+    apm.add_function(wrap_pyfunction!(aplist, &apm)?)?;
+    apm.add_function(wrap_pyfunction!(aplist_many, &apm)?)?;
+    apm.add_function(wrap_pyfunction!(moments, &apm)?)?;
+    m.add_submodule(&apm)
 }

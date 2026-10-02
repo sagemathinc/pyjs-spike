@@ -9,4 +9,5 @@ path = "src/main.rs"
 
 [dependencies]
 sagebrush-modsym = { path = "../modsym" }
+sagebrush-ap = { path = "../ap" }
 rayon = "1.10"

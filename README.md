@@ -10,12 +10,19 @@ in seconds. Every result should come with a status saying whether it is
 *proven* or only heuristic. The design is many small, strong engines that
 share one core, not one huge system.
 
-Status: one engine (modular symbols), not published to any package
-registry, and no license chosen yet.
+Status: two engines (modular symbols, and a_p of elliptic curves), not
+published to any package registry, and no license chosen yet.
 
 ## What works today
 
-Weight-2 modular symbols for Gamma0(N), sign +1:
+**`ap`**: traces of Frobenius a_p of elliptic curves over Q at all primes up
+to a bound. It is a from-scratch Rust port of the genus-1 strategy of Drew
+Sutherland's smalljac. Its output matches smalljac exactly (every prime to
+10^6, checksums to 10^8) and matches Sage below 20000. On 16 threads it
+beats smalljac's own 16-process mode at 10^7; on one core it is
+1.2-1.6x slower. See [results/ap.md](results/ap.md).
+
+**`modsym`**: weight-2 modular symbols for Gamma0(N), sign +1:
 
 - characteristic polynomials of Hecke operators T_q modulo a prime;
 - **proven** characteristic polynomials over Z, by multimodular CRT with a
@@ -78,7 +85,9 @@ fits within the bound.
 
 ## Tests
 
-`cd engine && cargo test -p sagebrush-modsym` runs in about 5 seconds after the first build. It checks:
+`cd engine && cargo test -p sagebrush-modsym -p sagebrush-ap` runs in about 10 seconds after the
+first build. For `ap` it checks agreement with smalljac and Sage (see
+[results/ap.md](results/ap.md)). For `modsym` it checks:
 
 - exact characteristic polynomials against 24 Sage computations, levels 1
   to 2003, including prime powers and non-squarefree levels;
@@ -107,7 +116,7 @@ caveats: [results/engine-exact.md](results/engine-exact.md) and
 
 | path | contents |
 |---|---|
-| `engine/` | the Rust workspace: `modsym` (the engine), `cli`, `py`, `node`, `wasm`, `bench` |
+| `engine/` | the Rust workspace: engines `modsym` and `ap`; bindings `cli`, `py`, `node`, `wasm`; `bench` |
 | `results/` | write-ups of every experiment, with numbers |
 | `bench/modsym/` | the pure-Python reference implementation and a line-by-line Rust port |
 | `src/`, `lib/`, `test/`, `target/`, `scripts/`, `PLAN.md` | the original pyjs experiment (below) |

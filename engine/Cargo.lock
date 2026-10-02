@@ -371,10 +371,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "sagebrush-ap"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
 name = "sagebrush-cli"
 version = "0.1.0"
 dependencies = [
  "rayon",
+ "sagebrush-ap",
  "sagebrush-modsym",
 ]
 
@@ -396,6 +404,7 @@ dependencies = [
  "napi-derive",
  "num-bigint",
  "rayon",
+ "sagebrush-ap",
  "sagebrush-modsym",
 ]
 
@@ -406,6 +415,7 @@ dependencies = [
  "num-bigint",
  "pyo3",
  "rayon",
+ "sagebrush-ap",
  "sagebrush-modsym",
 ]
 

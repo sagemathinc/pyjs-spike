@@ -31,6 +31,20 @@ Or import it yourself:
 Space: weight 2, Gamma0(N), sign +1 modular symbols. q must be a prime
 not dividing N (otherwise ValueError / a thrown Error).
 
+## `sagebrush.ap` (Python name = JS name)
+
+| function | returns |
+|---|---|
+| `ap(a, p)` | a_p of the curve a = [a1,a2,a3,a4,a6] at the prime p (None/null at bad p) |
+| `aplist(a, n, threads=0)` | Python: [(p, a_p)] for p <= n. JS: {primes, ap} |
+| `aplist_many(curves, n, threads=0)` | Python only: aplist for many curves, in parallel over curves |
+| `moments(a, n, kmax=4, threads=0)` | (number of good p, [mean (a_p^2/p)^k for k = 1..kmax]): Sato-Tate |
+
+    from sagebrush import ap
+    ap.moments([0, -1, 1, -10, -20], 10**7)    # ~0.4 s: (664578, [1.0, 2.0, 5.0, 14.0])
+    ap.moments([0, 0, 1, 0, 0], 10**7)         # CM: [1, 3, 10, 35]
+    ~/sagebrush/engine/target/release/sagebrush ap "[0,-1,1,-10,-20]" 100000000
+
 ## Things to try
 
     m.charpoly_exact(37, 2)["charpoly"]      # [0, -6, -1, 1] = x (x - 3)(x + 2)
