@@ -258,8 +258,22 @@ export function intTrueDiv(a: bigint, b: bigint): number {
   return neg ? -result : result;
 }
 
+// Python floor division and modulo on safe-integer numbers.  JS `%` on
+// values outside int32 compiles to a slow fmod call, so outside int32 we
+// divide in floating point and correct by one: with |a| + |b| < 2^53 the
+// product q * b is exact, so r = a - q * b is exact.
+const TWO53 = 9007199254740992;
+function floorQuot(a: number, b: number): number {
+  let q = Math.floor(a / b);
+  const r = a - q * b;
+  if (b > 0 ? r < 0 : r > 0) q -= 1;
+  else if (b > 0 ? r >= b : r <= b) q += 1;
+  return q;
+}
+
 export function floordiv(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number" && isInt(a) && isInt(b) && b !== 0) {
+    if (Math.abs(a) + Math.abs(b) < TWO53) return floorQuot(a, b) + 0;
     const r = a % b; // exact for safe integers, so (a - r) / b is exact too
     const q = (a - r) / b;
     return (r !== 0 && r < 0 !== b < 0 ? q - 1 : q) + 0;
@@ -308,6 +322,19 @@ export function floatDivmod(vx: number, wx: number): [number, number] {
 
 export function mod(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number" && isInt(a) && isInt(b) && b !== 0) {
+    if ((a | 0) === a && (b | 0) === b) {
+      const r = a % b;
+      return (r !== 0 && r < 0 !== b < 0 ? r + b : r) + 0;
+    }
+    if (Math.abs(a) + Math.abs(b) < TWO53) {
+      let r = a - Math.floor(a / b) * b;
+      if (b > 0) {
+        if (r < 0) r += b;
+        else if (r >= b) r -= b;
+      } else if (r > 0) r += b;
+      else if (r <= b) r -= b;
+      return r + 0;
+    }
     const r = a % b;
     return (r !== 0 && r < 0 !== b < 0 ? r + b : r) + 0;
   }

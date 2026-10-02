@@ -136,9 +136,18 @@ subclasses; generator close()/throw() edge cases; `__dict__` is a snapshot.
   N ~ 5000; all agree exactly with Sage.  Sage pulls ahead at N = 10007
   through native linear algebra, which is where FLINT belongs in the stack.
 
-**Provisional answer to the question:** yes on throughput -- compiled Python
-on V8 is at parity with CPython 3.14 in steady state, and faster on numeric
-and object-heavy code.  The open risk is first-run latency on very short
+* **PyPy** (`results/pypy.md`): PyPy is about 12x faster than pyjs (and
+  CPython) warm on this subset, and 7-15x faster on the modular-symbols
+  program -- 6.6 s at N = 10007 versus 48 s for Sage's native code.  pyjs's
+  remaining cost is per-operation type and overflow checks that V8 cannot
+  hoist; PyPy's tracing JIT specializes them away.  pyjs beats PyPy on
+  first-run time for several benchmarks, and PyPy does not run in browsers.
+
+**Provisional answer to the question:** yes on throughput relative to
+CPython -- compiled Python on V8 is at parity with CPython 3.14 in steady
+state, and faster on numeric and object-heavy code -- but far from PyPy,
+which shows how much faster Python semantics can run with type
+specialization.  The open risk is first-run latency on very short
 workloads, which is a property of V8's tiering rather than of this design.
 
 ## Design validated by step 0
