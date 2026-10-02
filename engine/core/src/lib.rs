@@ -180,11 +180,13 @@ impl ModularSymbols {
             let (c, d) = (c as i64, d as i64);
             // Count hits per free generator, then combine coordinate vectors.
             let mut count = vec![0i64; m];
+            let mut seen = vec![false; m];
             let mut touched = vec![];
             for &(a, b, cc, dd) in &h {
                 if let Some((g, gs)) = self.rep_of[self.p1.index(c * a + d * cc, c * b + d * dd)] {
                     let g = g as usize;
-                    if count[g] == 0 {
+                    if !seen[g] {
+                        seen[g] = true;
                         touched.push(g);
                     }
                     count[g] += if gs ^ s { -1 } else { 1 };
