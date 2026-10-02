@@ -78,7 +78,7 @@ fits within the bound.
 
 ## Tests
 
-`cd engine && cargo test -p modsym-core` takes about 5 seconds. It checks:
+`cd engine && cargo test -p modsym-core` runs in about 5 seconds after the first build. It checks:
 
 - exact characteristic polynomials against 24 Sage computations, levels 1
   to 2003, including prime powers and non-squarefree levels;
