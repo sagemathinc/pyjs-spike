@@ -22,7 +22,7 @@ Before writing a compiler, write its intended output by hand and measure it.
 If even ideal output cannot reach the goal, no compiler will.
 
 * `bench/bench.py` holds ten microbenchmarks plus pyperformance's `nbody`.
-* `target/rt.js` is a ~900-line runtime implementing the representation and
+* `target/rt.js` is an ~800-line runtime implementing the representation and
   caching design below.
 * `target/bench.js` is `bench.py` translated *mechanically*, the way the
   compiler would emit it:
