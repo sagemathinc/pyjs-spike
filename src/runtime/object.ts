@@ -100,6 +100,10 @@ export function objectType(name: string, bases: PyType[], dict: Map<string, any>
   proto.$cls = cls;
   const Ctor = function () {} as any;
   Ctor.prototype = proto;
+  // V8 keeps a new prototype in slow dictionary mode until a named store on
+  // an instance updates an inline cache; do one now so `$cls` loads and
+  // negative lookups through the prototype are fast from the start.
+  new Ctor().$warm = 0;
   cls.$ctor = Ctor;
   for (const b of bases) {
     if (b.$ctor === null && b !== T.object) raise(T.TypeError, `subclassing '${b.$name}' is not supported yet`);
@@ -796,4 +800,56 @@ export class PyBytes {
 export class PyByteArray extends PyBytes {}
 export function isBytesLike(x: any): x is PyBytes {
   return x instanceof PyBytes;
+}
+
+// ------------------------------------------------------------------ builtin arity
+
+// [min, max] positional arguments of a JS function, from its source:
+// parameters before the first default are required; `...rest` is unbounded.
+export function jsArity(f: any): [number, number] {
+  const src = Function.prototype.toString.call(f);
+  const open = src.indexOf("(");
+  const arrow = src.indexOf("=>");
+  if (open < 0 || (arrow >= 0 && arrow < open)) return [1, 1]; // `x => ...`
+  let depth = 0, i = open, params = "";
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      depth--;
+      if (depth === 0) break;
+    }
+    if (i > open) params += depth === 1 && c === "," ? "\u0000" : c;
+  }
+  const parts = params.split("\u0000").map((p) => p.trim()).filter((p) => p.length);
+  if (parts.some((p) => p.startsWith("..."))) return [f.length, Infinity];
+  return [f.length, parts.length];
+}
+
+function arityError(name: string, min: number, max: number, n: number, self: boolean): never {
+  const d = self ? 1 : 0;
+  const [lo, hi, got] = [min - d, max - d, n - d];
+  let msg: string;
+  if (lo === hi) msg = `${name}() takes ${lo === 0 ? "no arguments" : lo === 1 ? "exactly one argument" : `exactly ${lo} arguments`} (${got} given)`;
+  else if (got < lo) msg = `${name} expected at least ${lo} argument${lo === 1 ? "" : "s"}, got ${got}`;
+  else msg = `${name} expected at most ${hi} argument${hi === 1 ? "" : "s"}, got ${got}`;
+  raise(T.TypeError, msg);
+}
+
+// Wrap a builtin so calls with the wrong number of positional arguments
+// raise TypeError.  The wrapper has a fixed parameter list so V8 inlines it.
+export function checkArity(f: any, name: string, self: boolean, range?: [number, number]): any {
+  const [min, max] = range ?? jsArity(f);
+  let w: any;
+  if (max === Infinity) {
+    w = function (...a: any[]) {
+      if (a.length < min) arityError(name, min, max, a.length, self);
+      return f(...a);
+    };
+  } else {
+    const ps = Array.from({ length: max }, (_, i) => "a" + i).join(", ");
+    w = new Function("f", "err", `"use strict"; return function ${/^[A-Za-z_]\w*$/.test(name) ? name + "_" : "builtin"}(${ps}) { const n = arguments.length; if (n < ${min} || n > ${max}) err(n); return f(${ps}); };`)(f, (n: number) => arityError(name, min, max, n, self));
+  }
+  for (const k of Object.keys(f)) w[k] = f[k];
+  return w;
 }

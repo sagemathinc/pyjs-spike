@@ -551,12 +551,9 @@ class Lowering {
       if (isBytes) {
         bytes ??= [];
         for (const c of s.children.slice(1, -1)) {
+          if (/[^\x00-\x7f]/.test(c.text)) this.fail(s, "bytes can only contain ASCII literal characters");
           const text = raw ? c.text : decodeEscapes(c.text, true, (m) => this.fail(s, m));
-          for (const ch of text) {
-            const code = ch.charCodeAt(0);
-            if (code > 127 && !raw) this.fail(s, "bytes can only contain ASCII literal characters");
-            bytes.push(code);
-          }
+          for (const ch of text) bytes.push(ch.charCodeAt(0));
         }
         return;
       }

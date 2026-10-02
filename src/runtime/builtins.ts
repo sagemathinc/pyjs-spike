@@ -3,7 +3,7 @@
 import { writeSync } from "fs";
 import {
   T, PyType, FloatBox, PyDict, DONE, NotImplemented, Ellipsis, typeOf, typeName, lookupType, isType, raise, builtin, sig, tuple,
-  isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType,
+  isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, format, formatFixed } from "./format";
@@ -182,12 +182,18 @@ function isinstanceImpl(x: any, spec: any): boolean {
   if (!isType(spec)) raise(T.TypeError, "isinstance() arg 2 must be a type, a tuple of types, or a union");
   const ic = lookupType(typeOf(spec), "__instancecheck__");
   if (ic !== undefined && typeOf(spec) !== T.type) return O.truth(ic(spec, x));
-  return isinstance(x, spec);
+  return isinstance(x, spec) || subclassHook(spec, typeOf(x));
+}
+// ABC-style structural checks: a class's __subclasshook__ classmethod.
+function subclassHook(spec: PyType, c: PyType): boolean {
+  const hook = lookupType(spec, "__subclasshook__");
+  if (hook instanceof Ty.PyClassMethod) return hook.f(spec, c) === true;
+  return false;
 }
 function issubclassImpl(c: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => issubclassImpl(c, s));
   if (!isType(c)) raise(T.TypeError, "issubclass() arg 1 must be a class");
-  return c.$mro.includes(spec);
+  return c.$mro.includes(spec) || subclassHook(spec, c);
 }
 
 function hasattrImpl(o: any, name: string): boolean {
@@ -199,7 +205,7 @@ function hasattrImpl(o: any, name: string): boolean {
     throw e;
   }
 }
-function getattrImpl(o: any, name: any, dflt?: any): any {
+function getattrImpl(o: any, name: any, dflt: any = undefined): any {
   if (typeof name !== "string") raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
   if (dflt === undefined) return getattr(o, name);
   try {
@@ -210,7 +216,7 @@ function getattrImpl(o: any, name: any, dflt?: any): any {
   }
 }
 
-function iterImpl(x: any, sentinel?: any): any {
+function iterImpl(x: any, sentinel: any = undefined): any {
   if (sentinel !== undefined) {
     return new CallableIter(x, sentinel);
   }
@@ -268,7 +274,7 @@ function allImpl(x: any): boolean {
   for (let v = it.$next(); v !== DONE; v = it.$next()) if (!O.truth(v)) return false;
   return true;
 }
-function varsImpl(o?: any): PyDict {
+function varsImpl(o: any = undefined): PyDict {
   if (o === undefined) raise(T.NotImplementedError, "vars() without an argument is not supported");
   if (isType(o)) return getattr(o, "__dict__");
   if (!hasInstanceDict(o)) raise(T.TypeError, "vars() argument must have __dict__ attribute");
@@ -285,7 +291,7 @@ function absImpl(x: any): any {
 function callable(x: any): boolean {
   return typeof x === "function" || lookupType(typeOf(x), "__call__") !== undefined;
 }
-function nextImpl(it: any, dflt?: any): any {
+function nextImpl(it: any, dflt: any = undefined): any {
   return O.next(it, dflt);
 }
 function powImpl(a: any, b: any, m: any = null): any {
@@ -304,8 +310,14 @@ function asciiImpl(x: any): string {
 // ------------------------------------------------------------------ the builtins module
 
 export const builtins: any = Ty.newModule("builtins");
-const define = (name: string, v: any) => {
-  if (typeof v === "function" && v.__name__ === undefined && !isType(v)) builtin(v, name);
+const define = (name: string, v: any, range?: [number, number]) => {
+  if (typeof v === "function" && !isType(v)) {
+    const kw = v.$kw, sg = v.$sig;
+    v = checkArity(v, name, false, range);
+    builtin(v, name);
+    if (kw !== undefined) v.$kw = kw;
+    if (sg !== undefined) v.$sig = sg;
+  }
   builtins[name] = v;
 };
 for (const name of ["object", "type", "int", "float", "bool", "str", "list", "tuple", "dict", "set", "frozenset", "range", "slice", "bytes", "bytearray", "property", "staticmethod", "classmethod", "super", "enumerate", "zip", "map", "filter", "reversed"]) define(name, T[name]);
@@ -317,29 +329,29 @@ define("NotImplemented", NotImplemented);
 define("Ellipsis", Ellipsis);
 define("__debug__", true);
 define("print", print);
-define("len", O.len);
-define("repr", repr);
+define("len", O.len, [1, 1]);
+define("repr", repr, [1, 1]);
 define("ascii", asciiImpl);
 define("abs", absImpl);
-define("sum", sum);
+define("sum", sum, [1, 2]);
 define("min", (...a: any[]) => minmax("min", a, null, undefined, false));
 builtins.min.$kw = minmaxKw("min", false);
 define("max", (...a: any[]) => minmax("max", a, null, undefined, true));
 builtins.max.$kw = minmaxKw("max", true);
-define("sorted", sorted);
-define("round", roundImpl);
-define("divmod", O.divmod);
-define("pow", powImpl);
+define("sorted", sorted, [1, 3]);
+define("round", roundImpl, [1, 2]);
+define("divmod", O.divmod, [2, 2]);
+define("pow", powImpl, [2, 3]);
 define("hash", hashImpl);
-define("id", O.id);
+define("id", O.id, [1, 1]);
 define("isinstance", isinstanceImpl);
 define("issubclass", issubclassImpl);
 define("hasattr", hasattrImpl);
-define("getattr", getattrImpl);
+define("getattr", getattrImpl, [2, 3]);
 define("setattr", (o: any, n: string, v: any) => (setattr(o, n, v), null));
 define("delattr", (o: any, n: string) => (delattr(o, n), null));
-define("iter", iterImpl);
-define("next", nextImpl);
+define("iter", iterImpl, [1, 2]);
+define("next", nextImpl, [1, 2]);
 define("any", anyImpl);
 define("all", allImpl);
 define("callable", callable);
@@ -348,9 +360,9 @@ define("ord", ord);
 define("hex", radix("0x", 16));
 define("oct", radix("0o", 8));
 define("bin", radix("0b", 2));
-define("format", formatImpl);
-define("vars", varsImpl);
-define("dir", Ty.dir);
+define("format", formatImpl, [1, 2]);
+define("vars", varsImpl, [0, 1]);
+define("dir", Ty.dir, [0, 1]);
 define("input", () => raise(T.EOFError, "EOF when reading a line"));
 
 // Global-name lookup miss: builtins, else NameError.

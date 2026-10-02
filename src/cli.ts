@@ -21,7 +21,7 @@ async function main() {
   }
   const sys = R.importModule("sys");
   sys.argv.push(...argv);
-  sys.path.push(dirname(resolve(file)));
+  sys.path.push(dirname(resolve(file)), resolve(__dirname, "../../lib"));
   let code = 0;
   try {
     execModule(source, file, "__main__");

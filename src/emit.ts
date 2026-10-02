@@ -511,6 +511,7 @@ export class Emitter {
           this.w("}");
         });
       case "For":
+        if (this.isRangeCall(st.iter)) return this.rangeFor(st);
         return this.loop(st.orelse, () => {
           const it = this.temp();
           const v = this.temp();
@@ -577,6 +578,39 @@ export class Emitter {
         for (const t of st.targets) this.del(t);
         return;
     }
+  }
+
+  isRangeCall(e: A.Expr): e is Extract<A.Expr, { k: "Call" }> {
+    return e.k === "Call" && e.func.k === "Name" && e.func.id === "range" && e.keywords.length === 0 && e.args.length >= 1 && e.args.length <= 3 && !e.args.some((a) => a.k === "Starred") && resolve(this.fn.scope, "range").kind === "global" && !this.moduleBinds("range");
+  }
+
+  // `for x in range(...)`: count in JS numbers while `range` is the builtin
+  // and the arguments are small ints; otherwise iterate the range object.
+  // One loop body serves both paths.
+  rangeFor(st: Extract<A.Stmt, { k: "For" }>) {
+    const call = st.iter as Extract<A.Expr, { k: "Call" }>;
+    this.loop(st.orelse, () => {
+      const f = this.temp(), it = this.temp(), i = this.temp(), end = this.temp(), step = this.temp(), v = this.temp();
+      const args = call.args.map((a) => {
+        const t = this.temp();
+        this.w(`${t} = ${this.ex(a)};`);
+        return t;
+      });
+      this.w(`${f} = ${this.load("range")};`);
+      const [start, stop, stp] = args.length === 1 ? ["0", args[0], "1"] : args.length === 2 ? [args[0], args[1], "1"] : args;
+      const ints = args.map((a) => `typeof ${a} === "number" && Number.isInteger(${a})`).join(" && ");
+      this.w(`if (${f} === $B.range && ${ints}${args.length === 3 ? ` && ${stp} !== 0` : ""}) { ${i} = ${start}; ${end} = ${stop}; ${step} = ${stp}; ${it} = null; }`);
+      this.w(`else ${it} = iter(callObj(${f}, [${args.join(", ")}]));`);
+      this.w(`for (;;) {`);
+      this.indent++;
+      if (args.length === 3) this.w(`if (${it} === null) { if (${step} > 0 ? ${i} >= ${end} : ${i} <= ${end}) break; ${v} = ${i}; ${i} += ${step}; }`);
+      else this.w(`if (${it} === null) { if (${i} >= ${end}) break; ${v} = ${i}++; }`);
+      this.w(`else { ${v} = ${it}.$next(); if (${v} === DONE) break; }`);
+      this.w(this.assignCode(st.target, v));
+      this.indent--;
+      this.block(st.body);
+      this.w("}");
+    });
   }
 
   del(t: A.Expr) {

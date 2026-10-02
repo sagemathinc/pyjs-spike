@@ -1,7 +1,7 @@
 // Builtin types and their methods.
 
 import {
-  T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
+  checkArity, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
   bindMethod, bindArgs, callKw, callObj, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
@@ -11,6 +11,7 @@ import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr } from "./
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
 export function method(cls: PyType, name: string, f: any, s: Signature | null = null) {
+  f = checkArity(f, name, true);
   pyfn(f, name, s);
   f.$builtinMethod = true;
   f.__qualname__ = `${cls.$name}.${name}`;
@@ -395,7 +396,7 @@ function parseIntLiteral(s: string, base: number): number | bigint | undefined {
   return O.normBig(neg ? -v : v);
 }
 
-export function intCall(x: any = 0, base?: any): any {
+export function intCall(x: any = 0, base: any = undefined): any {
   if (base !== undefined) {
     if (typeof x !== "string" && !(x instanceof PyBytes)) raise(T.TypeError, "int() can't convert non-string with explicit base");
     const b = Number(base);
@@ -517,7 +518,7 @@ method(T.bool, "__repr__", (x: any) => (x ? "True" : "False"));
 
 // ------------------------------------------------------------------ str
 
-const S = builtinType("str", [object], (x: any = "", encoding?: any, errors?: any) => {
+const S = builtinType("str", [object], (x: any = "", encoding: any = undefined, errors: any = undefined) => {
   if (encoding !== undefined && x instanceof PyBytes) return decode(x, encoding, errors);
   return str(x);
 });
@@ -671,19 +672,19 @@ function findImpl(s: string, sub: string, start: any, end: any, rev: boolean): n
   const j = rev ? s.lastIndexOf(sub, b - sub.length) : s.indexOf(sub, a);
   return j < a || j + sub.length > b ? -1 : j;
 }
-method(S, "find", (s: string, sub: string, start?: any, end?: any) => findImpl(s, sub, start, end, false));
-method(S, "rfind", (s: string, sub: string, start?: any, end?: any) => findImpl(s, sub, start, end, true));
-method(S, "index", (s: string, sub: string, start?: any, end?: any) => {
+method(S, "find", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, false));
+method(S, "rfind", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, true));
+method(S, "index", (s: string, sub: string, start: any = undefined, end: any = undefined) => {
   const j = findImpl(s, sub, start, end, false);
   if (j < 0) raise(T.ValueError, "substring not found");
   return j;
 });
-method(S, "rindex", (s: string, sub: string, start?: any, end?: any) => {
+method(S, "rindex", (s: string, sub: string, start: any = undefined, end: any = undefined) => {
   const j = findImpl(s, sub, start, end, true);
   if (j < 0) raise(T.ValueError, "substring not found");
   return j;
 });
-method(S, "count", (s: string, sub: string, start?: any, end?: any) => {
+method(S, "count", (s: string, sub: string, start: any = undefined, end: any = undefined) => {
   const [a, b] = clampRange(s, start, end);
   const t = s.slice(a, b);
   return sub === "" ? t.length + 1 : t.split(sub).length - 1;
@@ -695,8 +696,8 @@ function affix(s: string, x: any, start: any, end: any, ends: boolean): boolean 
   const t = s.slice(a, b);
   return ends ? t.endsWith(x) : t.startsWith(x);
 }
-method(S, "startswith", (s: string, p: any, start?: any, end?: any) => affix(s, p, start, end, false));
-method(S, "endswith", (s: string, p: any, start?: any, end?: any) => affix(s, p, start, end, true));
+method(S, "startswith", (s: string, p: any, start: any = undefined, end: any = undefined) => affix(s, p, start, end, false));
+method(S, "endswith", (s: string, p: any, start: any = undefined, end: any = undefined) => affix(s, p, start, end, true));
 method(S, "upper", (s: string) => s.toUpperCase());
 method(S, "lower", (s: string) => s.toLowerCase());
 method(S, "casefold", (s: string) => s.toLowerCase());
@@ -757,8 +758,8 @@ method(S, "__len__", (s: string) => s.length);
 method(S, "__contains__", (s: string, x: any) => O.contains(s, x));
 method(S, "__getitem__", (s: string, k: any) => O.getitem(s, k));
 method(S, "__add__", (s: string, x: any) => (typeof x === "string" ? s + x : NotImplemented));
-method(S, "__mul__", (s: string, x: any) => O.mul(s, x));
-method(S, "__mod__", (s: string, x: any) => O.mod(s, x));
+method(S, "__mul__", (s: string, x: any) => (O.isPyInt(x) ? s.repeat(Math.max(0, Number(x))) : NotImplemented));
+method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
 method(S, "__eq__", (s: string, x: any) => (typeof x === "string" ? s === x : NotImplemented));
 method(S, "__lt__", (s: string, x: any) => (typeof x === "string" ? s < x : NotImplemented));
 method(S, "__hash__", (s: string) => O.hashAny(s));
@@ -852,8 +853,8 @@ export function strFormat(s: string, args: any[], kw: any): string {
 
 // ------------------------------------------------------------------ list, tuple
 
-const list = builtinType("list", [object], (x?: any) => (x === undefined ? [] : O.toArray(x)));
-const tupleType = builtinType("tuple", [object], (x?: any) => (x === undefined ? tuple([]) : Array.isArray(x) && (x as any).$t === true ? x : tuple(O.toArray(x))));
+const list = builtinType("list", [object], (x: any = undefined) => (x === undefined ? [] : O.toArray(x)));
+const tupleType = builtinType("tuple", [object], (x: any = undefined) => (x === undefined ? tuple([]) : Array.isArray(x) && (x as any).$t === true ? x : tuple(O.toArray(x))));
 
 // Stable sort using only `<`, like CPython.  reverse=True keeps equal
 // elements in their original order (reverse, sort, reverse).
@@ -911,7 +912,7 @@ const seqIndexOf = (a: any[], x: any, start: any, end: any, what: string) => {
   for (let i = lo; i < Math.min(hi, a.length); i++) if (O.eqBool(a[i], x)) return i;
   raise(T.ValueError, what === "list" ? "list.index(x): x not in list" : "tuple.index(x): x not in tuple");
 };
-method(list, "index", (a: any[], x: any, start?: any, end?: any) => seqIndexOf(a, x, start, end, "list"));
+method(list, "index", (a: any[], x: any, start: any = undefined, end: any = undefined) => seqIndexOf(a, x, start, end, "list"));
 method(list, "count", (a: any[], x: any) => a.filter((v) => O.eqBool(v, x)).length);
 method(list, "reverse", (a: any[]) => {
   a.reverse();
@@ -932,11 +933,11 @@ method(list, "__setitem__", (a: any[], k: any, v: any) => (O.setitem(a, k, v), n
 method(list, "__contains__", (a: any[], x: any) => O.contains(a, x));
 method(list, "__iter__", (a: any[]) => O.iter(a));
 method(list, "__eq__", (a: any[], b: any) => (Array.isArray(b) && !(b as any).$t ? O.eq(a, b) : NotImplemented));
-method(list, "__add__", (a: any[], b: any) => O.add(a, b));
+method(list, "__add__", (a: any[], b: any) => (Array.isArray(b) && !(b as any).$t ? a.concat(b) : NotImplemented));
 method(list, "__repr__", (a: any[]) => repr(a));
 list.$dict.set("__hash__", null);
 
-method(tupleType, "index", (a: any[], x: any, start?: any, end?: any) => seqIndexOf(a, x, start, end, "tuple"));
+method(tupleType, "index", (a: any[], x: any, start: any = undefined, end: any = undefined) => seqIndexOf(a, x, start, end, "tuple"));
 method(tupleType, "count", (a: any[], x: any) => a.filter((v) => O.eqBool(v, x)).length);
 method(tupleType, "__len__", (a: any[]) => a.length);
 method(tupleType, "__getitem__", (a: any[], k: any) => O.getitem(a, k));
@@ -944,12 +945,12 @@ method(tupleType, "__contains__", (a: any[], x: any) => O.contains(a, x));
 method(tupleType, "__iter__", (a: any[]) => O.iter(a));
 method(tupleType, "__hash__", (a: any[]) => O.hashAny(a));
 method(tupleType, "__eq__", (a: any[], b: any) => (Array.isArray(b) && (b as any).$t ? O.eq(a, b) : NotImplemented));
-method(tupleType, "__add__", (a: any[], b: any) => O.add(a, b));
+method(tupleType, "__add__", (a: any[], b: any) => (Array.isArray(b) && (b as any).$t ? tuple(a.concat(b)) : NotImplemented));
 method(tupleType, "__repr__", (a: any[]) => repr(a));
 
 // ------------------------------------------------------------------ dict
 
-function dictCall(x?: any): PyDict {
+function dictCall(x: any = undefined): PyDict {
   const d = new PyDict();
   if (x !== undefined) O.dictUpdate(d, x);
   return d;
@@ -1006,7 +1007,7 @@ method(dict, "setdefault", (d: PyDict, k: any, dflt: any = null) => {
   dictSet(d, k, dflt);
   return dflt;
 });
-method(dict, "pop", (d: PyDict, k: any, dflt?: any) => {
+method(dict, "pop", (d: PyDict, k: any, dflt: any = undefined) => {
   const v = dictGet(d, k);
   if (v === undefined) {
     if (dflt !== undefined) return dflt;
@@ -1023,7 +1024,7 @@ method(dict, "popitem", (d: PyDict) => {
   dictDelete(d, k);
   return tuple([k, v]);
 });
-method(dict, "update", (d: PyDict, other?: any) => {
+method(dict, "update", (d: PyDict, other: any = undefined) => {
   if (other !== undefined) O.dictUpdate(d, other);
   return null;
 });
@@ -1056,8 +1057,8 @@ dict.$dict.set("__hash__", null);
 
 // ------------------------------------------------------------------ set, frozenset
 
-const set = builtinType("set", [object], (x?: any) => O.newSet(x));
-const frozenset = builtinType("frozenset", [object], (x?: any) => (x instanceof O.PySet && x.$frozen ? x : O.newSet(x, true)));
+const set = builtinType("set", [object], (x: any = undefined) => O.newSet(x));
+const frozenset = builtinType("frozenset", [object], (x: any = undefined) => (x instanceof O.PySet && x.$frozen ? x : O.newSet(x, true)));
 Object.defineProperty(O.PySet.prototype, "$cls", {
   get(this: O.PySet) {
     return this.$frozen ? frozenset : set;
@@ -1133,7 +1134,7 @@ const rangeArg = (v: any) => {
   if (typeof i === "bigint") raise(T.OverflowError, "range() arguments beyond 2**53 are not supported yet");
   return i as number;
 };
-export function makeRange(a: any, b?: any, c?: any): PyRange {
+export function makeRange(a: any, b: any = undefined, c: any = undefined): PyRange {
   const r = b === undefined ? new PyRange(0, rangeArg(a), 1) : new PyRange(rangeArg(a), rangeArg(b), c === undefined ? 1 : rangeArg(c));
   if (r.step === 0) raise(T.ValueError, "range() arg 3 must not be zero");
   return r;
@@ -1176,7 +1177,7 @@ method(range, "__eq__", (r: PyRange, o: any) => {
 });
 method(range, "__hash__", (r: PyRange) => O.hashAny(tuple([r.length, r.start, r.step])));
 
-const sliceType = builtinType("slice", [object], (a: any, b?: any, c?: any) => (b === undefined ? new O.PySlice(null, a, null) : new O.PySlice(a, b, c ?? null)));
+const sliceType = builtinType("slice", [object], (a: any, b: any = undefined, c: any = undefined) => (b === undefined ? new O.PySlice(null, a, null) : new O.PySlice(a, b, c ?? null)));
 bindClass(O.PySlice, sliceType);
 getset(sliceType, "start", (s) => s.start);
 getset(sliceType, "stop", (s) => s.stop);
@@ -1190,7 +1191,7 @@ method(sliceType, "__repr__", (s: O.PySlice) => `slice(${repr(s.start)}, ${repr(
 
 // ------------------------------------------------------------------ bytes, bytearray
 
-function toBytes(x: any, encoding?: any): Uint8Array {
+function toBytes(x: any, encoding: any = undefined): Uint8Array {
   if (x === undefined) return new Uint8Array(0);
   if (typeof x === "string") {
     if (encoding === undefined) raise(T.TypeError, "string argument without an encoding");
@@ -1207,8 +1208,8 @@ function toBytes(x: any, encoding?: any): Uint8Array {
     return Number(v);
   }));
 }
-const bytesType = builtinType("bytes", [object], (x?: any, enc?: any) => new PyBytes(toBytes(x, enc)));
-const bytearray = builtinType("bytearray", [object], (x?: any, enc?: any) => new PyByteArray(toBytes(x, enc)));
+const bytesType = builtinType("bytes", [object], (x: any = undefined, enc: any = undefined) => new PyBytes(toBytes(x, enc)));
+const bytearray = builtinType("bytearray", [object], (x: any = undefined, enc: any = undefined) => new PyByteArray(toBytes(x, enc)));
 bindClass(PyBytes, bytesType);
 bindClass(PyByteArray, bytearray);
 for (const bt of [bytesType, bytearray]) {
@@ -1378,7 +1379,7 @@ method(generator, "__repr__", (g: any) => `<generator object ${g.$name ?? "<gene
 
 // ------------------------------------------------------------------ dir
 
-export function dir(x?: any): any[] {
+export function dir(x: any = undefined): any[] {
   const names = new Set<string>();
   if (isType(x)) for (const c of x.$mro) for (const k of c.$dict.keys()) names.add(k);
   else {
@@ -1399,4 +1400,11 @@ export function floatCallSafe(x: any): number | undefined {
     if (f !== undefined) return O.fv(f(x));
   }
   return undefined;
+}
+
+// A builtin type for a runtime JS class, created by a builtin module.
+export function builtinTypeFor(name: string, jsClass: any, module: string, call: (...a: any[]) => any): PyType {
+  const t = builtinType(name, [object], call, module);
+  bindClass(jsClass, t);
+  return t;
 }
