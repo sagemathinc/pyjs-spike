@@ -14,7 +14,25 @@ pub mod linalg;
 pub mod p1;
 
 use p1::P1List;
-use std::time::Instant;
+// std::time::Instant panics on wasm32-unknown-unknown; time from the host there.
+#[cfg(not(target_arch = "wasm32"))]
+type Clock = std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+fn now() -> Clock {
+    std::time::Instant::now()
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn elapsed_ms(a: Clock, b: Clock) -> f64 {
+    (b - a).as_secs_f64() * 1000.0
+}
+#[cfg(target_arch = "wasm32")]
+type Clock = ();
+#[cfg(target_arch = "wasm32")]
+fn now() -> Clock {}
+#[cfg(target_arch = "wasm32")]
+fn elapsed_ms(_: Clock, _: Clock) -> f64 {
+    0.0
+}
 
 pub struct ModularSymbols {
     pub n: u64,
@@ -230,13 +248,12 @@ impl Result {
 }
 
 pub fn hecke_charpoly(n: u64, q: u64, p: u64) -> Result {
-    let t0 = Instant::now();
+    let t0 = now();
     let ms = ModularSymbols::new(n, p);
-    let t1 = Instant::now();
+    let t1 = now();
     let t = ms.hecke_matrix(q);
-    let t2 = Instant::now();
+    let t2 = now();
     let f = linalg::charpoly(t, p);
-    let t3 = Instant::now();
-    let d = |a: Instant, b: Instant| (b - a).as_secs_f64() * 1000.0;
-    Result { n, q, p, symbols: ms.p1.len(), dim: ms.dimension(), charpoly: f, ms: [d(t0, t1), d(t1, t2), d(t2, t3)] }
+    let t3 = now();
+    Result { n, q, p, symbols: ms.p1.len(), dim: ms.dimension(), charpoly: f, ms: [elapsed_ms(t0, t1), elapsed_ms(t1, t2), elapsed_ms(t2, t3)] }
 }
