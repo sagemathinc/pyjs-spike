@@ -27,6 +27,7 @@ Or import it yourself:
 | `level_data(N)` | `levelData(N)` | psi, genus, cusps, Eisenstein dim, dim |
 | `estimate(N, q)` | `estimate(N, q)` | predicted dim, primes, bytes, one-thread seconds |
 | `commute(N, q, r, p=..., threads=0)` | `commute(N, q, r, p?, threads?)` | T_q T_r == T_r T_q mod p |
+| `rational_newforms(N, bound=1000, threads=0)` | (Python only for now) | the rational newforms of level N: [(p, a_p)] for p <= bound, p not dividing N |
 
 Space: weight 2, Gamma0(N), sign +1 modular symbols. q must be a prime
 not dividing N (otherwise ValueError / a thrown Error).

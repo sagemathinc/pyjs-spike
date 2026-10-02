@@ -393,6 +393,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "rayon",
+ "sagebrush-ap",
 ]
 
 [[package]]

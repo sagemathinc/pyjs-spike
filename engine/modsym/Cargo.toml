@@ -11,3 +11,6 @@ parallel = ["dep:rayon"]
 rayon = { version = "1.10", optional = true }
 num-bigint = "0.4"
 num-traits = "0.2"
+
+[dev-dependencies]
+sagebrush-ap = { path = "../ap" }

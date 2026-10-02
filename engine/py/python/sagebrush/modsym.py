@@ -12,5 +12,6 @@ hecke_charpoly = _native.hecke_charpoly
 level_data = _native.level_data
 estimate = _native.estimate
 commute = _native.commute
+rational_newforms = _native.rational_newforms
 
-__all__ = ["charpoly_exact", "batch_exact", "hecke_charpoly", "level_data", "estimate", "commute"]
+__all__ = ["charpoly_exact", "batch_exact", "hecke_charpoly", "level_data", "estimate", "commute", "rational_newforms"]

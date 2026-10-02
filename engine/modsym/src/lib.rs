@@ -18,6 +18,7 @@ mod par;
 pub mod estimate;
 pub mod exact;
 pub mod linalg;
+pub mod newforms;
 pub mod p1;
 pub mod presentation;
 pub mod space;

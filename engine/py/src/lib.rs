@@ -114,6 +114,14 @@ fn estimate<'py>(py: Python<'py>, n: u64, q: u64) -> PyResult<Bound<'py, PyDict>
     Ok(d)
 }
 
+/// The rational newforms of level N: a list of [(p, a_p)] for primes p <= bound not dividing N.
+#[pyfunction]
+#[pyo3(signature = (n, bound=1000, threads=0))]
+fn rational_newforms(py: Python<'_>, n: u64, bound: u64, threads: usize) -> PyResult<Vec<Vec<(u64, i64)>>> {
+    let r = run(py, threads, || sagebrush_modsym::newforms::rational_newforms(n, bound, 40)).map_err(err)?;
+    Ok(r.forms.into_iter().map(|f| f.ap).collect())
+}
+
 // ---- sagebrush.ap: traces of Frobenius of elliptic curves ----
 
 fn curve(a: Vec<i64>) -> PyResult<sagebrush_ap::EllipticCurve> {
@@ -165,6 +173,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     modsym.add_function(wrap_pyfunction!(level_data, &modsym)?)?;
     modsym.add_function(wrap_pyfunction!(commute, &modsym)?)?;
     modsym.add_function(wrap_pyfunction!(estimate, &modsym)?)?;
+    modsym.add_function(wrap_pyfunction!(rational_newforms, &modsym)?)?;
     m.add_submodule(&modsym)?;
     let apm = PyModule::new(m.py(), "ap")?;
     apm.add_function(wrap_pyfunction!(ap, &apm)?)?;

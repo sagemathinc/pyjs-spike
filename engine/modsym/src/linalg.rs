@@ -79,34 +79,6 @@ pub fn sparse_echelon(rows: &[Vec<(u32, u64)>], m: usize, p: u64) -> (Vec<(u32, 
     (pivots, pivot_of)
 }
 
-/// Each column (free generator) as a dense vector over the non-pivot
-/// columns, which form the quotient basis.
-pub fn back_substitute(pivots: &[(u32, Vec<(u32, u64)>)], pivot_of: &[u32], m: usize, p: u64) -> Vec<Vec<u64>> {
-    let basis: Vec<usize> = (0..m).filter(|&c| pivot_of[c] == u32::MAX).collect();
-    let dim = basis.len();
-    let mut coords = vec![vec![]; m];
-    for (t, &c) in basis.iter().enumerate() {
-        let mut v = vec![0u64; dim];
-        v[t] = 1;
-        coords[c] = v;
-    }
-    // x_pc + sum v_k x_k = 0; later pivots are already expressed.
-    for (pc, rest) in pivots.iter().rev() {
-        let mut v = vec![0u64; dim];
-        for &(k, x) in rest {
-            let neg = p - x;
-            for (a, &b) in v.iter_mut().zip(&coords[k as usize]) {
-                if b != 0 {
-                    *a = (*a + neg * b) % p;
-                }
-            }
-        }
-        coords[*pc as usize] = v;
-    }
-    coords
-}
-
-/// Cremona's Heilbronn matrices of determinant q, as (a, b, c, d).
 pub fn heilbronn(q: i64) -> Vec<(i64, i64, i64, i64)> {
     if q == 2 {
         return vec![(1, 0, 0, 2), (2, 0, 0, 1), (2, 1, 0, 1), (1, 0, 1, 2)];
@@ -284,6 +256,44 @@ fn dot_lazy_generic(y: &[u32], w: &[u32], ws: &[u32], p: u32) -> u64 {
         s += mul_lazy(w[k], ws[k], y[k], p) as u64;
     }
     s
+}
+
+/// Reduced row echelon form mod p < 2^31, zero rows removed, and the pivot
+/// columns.  Entries are u32 and row operations use the Shoup kernels
+/// (AVX2 when available), in parallel over rows.
+pub fn rref_mod(m: Vec<Vec<u64>>, p: u64) -> (Vec<Vec<u64>>, Vec<usize>) {
+    assert!(p < 1 << 31);
+    let p32 = p as u32;
+    let mut a: Vec<Vec<u32>> = m.into_iter().map(|r| r.into_iter().map(|x| x as u32).collect()).collect();
+    let cols = a.first().map_or(0, |r| r.len());
+    let mut pivots = vec![];
+    let mut r = 0;
+    for c in 0..cols {
+        if r == a.len() {
+            break;
+        }
+        let Some(i) = (r..a.len()).find(|&i| a[i][c] != 0) else { continue };
+        a.swap(r, i);
+        // Scale the pivot row to 1; it is zero left of column c.
+        let iv = powmod(a[r][c] as u64, p - 2, p);
+        for x in a[r][c..].iter_mut() {
+            *x = (*x as u64 * iv % p) as u32;
+        }
+        let pivot = a[r][c..].to_vec();
+        par::for_each_chunk_mut(&mut a, 16, |ci, rows| {
+            for (k, row) in rows.iter_mut().enumerate() {
+                let f = row[c];
+                if ci * 16 + k != r && f != 0 {
+                    let w = p32 - f;
+                    sub_mul(&mut row[c..], &pivot, w, shoup32(w, p32), p32);
+                }
+            }
+        });
+        pivots.push(c);
+        r += 1;
+    }
+    a.truncate(r);
+    (a.into_iter().map(|row| row.into_iter().map(|x| x as u64).collect()).collect(), pivots)
 }
 
 pub fn matmul(a: &[Vec<u64>], b: &[Vec<u64>], p: u64) -> Vec<Vec<u64>> {

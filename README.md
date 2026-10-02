@@ -10,7 +10,7 @@ in seconds. Every result should come with a status saying whether it is
 *proven* or only heuristic. The design is many small, strong engines that
 share one core, not one huge system.
 
-Status: two engines (modular symbols, and a_p of elliptic curves), not
+Status: two engines (modular symbols with rational newforms, and a_p of elliptic curves), not
 published to any package registry, and no license chosen yet.
 
 ## What works today
@@ -21,6 +21,13 @@ Sutherland's smalljac. Its output matches smalljac exactly (every prime to
 10^6, checksums to 10^8) and matches Sage below 20000. On 16 threads it
 beats smalljac's own 16-process mode at 10^7; on one core it is
 1.2-1.6x slower. See [results/ap.md](results/ap.md).
+
+**Rational newforms** (in `modsym`): every rational newform of level N and
+its a_p, found by splitting with integer Hecke eigenvalues in the Hasse
+range. It reproduces Cremona's tables exactly for every conductor up to
+9999 (38,042 isogeny classes) in 14 minutes on 16 cores, and agrees prime
+by prime with point counts from `ap`. See
+[results/newforms.md](results/newforms.md).
 
 **`modsym`**: weight-2 modular symbols for Gamma0(N), sign +1:
 
