@@ -390,7 +390,7 @@ export function format(v: any, spec: string): string {
   }
   if (typeof v === "boolean" && spec === "") return v ? "True" : "False";
   if (isPyInt(v)) {
-    if (spec === "") return String(+(v as any) === Number(v) && typeof v !== "bigint" ? Number(v) : v);
+    if (spec === "") return typeof v === "bigint" ? v.toString() : String(+v);
     return formatInt(typeof v === "bigint" ? v : BigInt(+v), parseSpec(spec));
   }
   if (typeof v === "number" || v instanceof FloatBox) {

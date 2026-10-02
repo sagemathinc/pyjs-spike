@@ -197,6 +197,7 @@ function subclassHook(spec: any, c: PyType): boolean {
 function issubclassImpl(c: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => issubclassImpl(c, s));
   if (!isType(c)) raise(T.TypeError, "issubclass() arg 1 must be a class");
+  if (!isType(spec)) raise(T.TypeError, "issubclass() arg 2 must be a class, a tuple of classes, or a union");
   return c.$mro.includes(spec) || subclassHook(spec, c);
 }
 

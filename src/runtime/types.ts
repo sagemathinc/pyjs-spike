@@ -446,6 +446,7 @@ method(int, "as_integer_ratio", (x: any) => tuple([x, 1]));
 method(int, "to_bytes", (x: any, length: any = 1, byteorder: string = "big", signed: any = false) => {
   let v = BigInt(x);
   const n = Number(length);
+  if (n < 0) raise(T.ValueError, "length argument must be non-negative");
   if (v < 0n) {
     if (!O.truth(signed)) raise(T.OverflowError, "can't convert negative int to unsigned");
     v += 1n << BigInt(8 * n);
@@ -565,6 +566,7 @@ export function encode(s: string, encoding: any = "utf-8", errors: any = "strict
 
 const isWs = (c: string) => /[\s\x1c-\x1f\x85]/.test(c);
 function stripChars(s: string, chars: any, left: boolean, right: boolean): string {
+  if (chars !== null && chars !== undefined && typeof chars !== "string") raise(T.TypeError, `strip arg must be None or str`);
   let i = 0, j = s.length;
   const drop = chars === null || chars === undefined ? isWs : (c: string) => chars.includes(c);
   if (left) while (i < j && drop(s[i])) i++;

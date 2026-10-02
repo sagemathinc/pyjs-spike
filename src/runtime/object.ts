@@ -84,7 +84,7 @@ function refreshFlags(cls: PyType) {
 // A builtin type whose instances use a runtime representation.  `call`
 // implements `T(...)`.
 export function builtinType(name: string, bases: PyType[], call: (...args: any[]) => any, module = "builtins"): PyType {
-  const cls = call as PyType;
+  const cls = checkArity(call, name, false) as PyType;
   cls.$ctor = null;
   finishType(cls, name, bases, new Map(), module);
   T[name] = cls;
@@ -422,7 +422,7 @@ function typeGetattr(cls: PyType, name: string, dflt?: any): any {
   if (md !== undefined && isDataDescriptor(md)) return descrGet(md, cls, meta);
   const d = lookupType(cls, name);
   if (d !== undefined) {
-    if (typeof d === "function") return d; // functions accessed on a class are plain functions
+    if (typeof d === "function") return d.$builtinMethod === true && cls.$ctor === null ? selfChecked(d, cls) : d; // functions on a class are plain functions
     if (d !== null && typeof d === "object") {
       const g = lookupType(typeOf(d), "__get__");
       if (g !== undefined) return g(d, null, cls);
@@ -432,6 +432,22 @@ function typeGetattr(cls: PyType, name: string, dflt?: any): any {
   if (md !== undefined) return descrGet(md, cls, meta);
   if (dflt !== undefined) return dflt;
   raise(T.AttributeError, `type object '${cls.$name}' has no attribute '${name}'`);
+}
+
+// `list.append` and friends, called unbound: CPython checks self's type.
+function selfChecked(f: any, cls: PyType): any {
+  let c = f.$selfChecked;
+  if (c === undefined) {
+    c = function (self: any, ...args: any[]) {
+      if (self === undefined) raise(T.TypeError, `unbound method ${cls.$name}.${f.__name__}() needs an argument`);
+      if (!isinstance(self, cls)) raise(T.TypeError, `descriptor '${f.__name__}' for '${cls.$name}' objects doesn't apply to a '${typeName(self)}' object`);
+      return f(self, ...args);
+    };
+    for (const k of Object.keys(f)) c[k] = f[k];
+    if (f.$sig !== undefined) c.$kw = (pos: any[], names: string[], values: any[]) => callKw(f, pos, names, values);
+    f.$selfChecked = c;
+  }
+  return c;
 }
 
 export function setattr(o: any, name: string, v: any): void {
@@ -627,7 +643,7 @@ function fillCallSite(S: any, cls: PyType, fn: any) {
 const jsName = (name: string) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : "attr");
 
 export function siteGet(name: string): (o: any) => any {
-  const S = { c: null, v: -1, k: 0, val: undefined, tc: null, tv: -1, tval: undefined };
+  const S = { c: null, v: -1, k: 0, val: undefined, tc: undefined as any, tv: -1, tval: undefined };
   const p = JSON.stringify(name);
   return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {
   if (o != null && o.$cls === S.c && S.c.$ver === S.v) {
@@ -648,7 +664,7 @@ export function siteSet(name: string): (o: any, v: any) => void {
 }
 
 export function siteCall(name: string, n: number): (o: any, ...args: any[]) => any {
-  const S: any = { next: 0, bk: 0, bfn: null, tc: null, tv: -1, tf: null };
+  const S: any = { next: 0, bk: 0, bfn: null, tc: undefined, tv: -1, tf: null };
   for (let i = 0; i < CALL_WAYS; i++) {
     S["c" + i] = null;
     S["v" + i] = -1;
@@ -713,6 +729,11 @@ export function raiseExc(x: any, cause?: any): any {
 // Convert anything caught by a JS `catch` into a Python exception.
 export function toPyExc(e: any): any {
   if (e !== null && typeof e === "object" && e.$cls !== undefined && isinstance(e, T.BaseException)) return e;
+  if (e instanceof TypeError && /Generator is already running/.test(e.message)) {
+    const r = T.ValueError("generator already executing");
+    Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
+    return r;
+  }
   if (e instanceof RangeError && /call stack/.test(e.message)) {
     const r = T.RecursionError("maximum recursion depth exceeded");
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
@@ -914,10 +935,13 @@ export function checkArity(f: any, name: string, self: boolean, range?: [number,
 export class ObjMap {
   constructor(public o: any) {}
   get size(): number {
-    return this.keys().length;
+    return this.names().length;
   }
-  keys(): string[] {
+  names(): string[] {
     return Object.keys(this.o).filter((k) => k[0] !== "$" && this.o[k] !== undefined);
+  }
+  keys(): IterableIterator<string> {
+    return this.names().values();
   }
   get(k: any): any {
     return typeof k === "string" && Object.prototype.hasOwnProperty.call(this.o, k) ? this.o[k] : undefined;
@@ -936,16 +960,16 @@ export class ObjMap {
     return true;
   }
   clear() {
-    for (const k of this.keys()) delete this.o[k];
+    for (const k of this.names()) delete this.o[k];
   }
-  values(): any[] {
-    return this.keys().map((k) => this.o[k]);
+  values(): IterableIterator<any> {
+    return this.names().map((k) => this.o[k]).values();
   }
-  entries(): any[][] {
-    return this.keys().map((k) => [k, this.o[k]]);
+  entries(): IterableIterator<any[]> {
+    return this.names().map((k) => [k, this.o[k]]).values();
   }
   [Symbol.iterator]() {
-    return this.entries()[Symbol.iterator]();
+    return this.entries();
   }
 }
 export function globalsDict(g: any): PyDict {
