@@ -50,7 +50,7 @@ pub struct Newforms {
     pub split_primes: Vec<u64>,
 }
 
-fn isqrt(n: u64) -> i64 {
+pub(crate) fn isqrt(n: u64) -> i64 {
     let mut r = (n as f64).sqrt() as u64;
     while r * r > n {
         r -= 1;
@@ -61,11 +61,11 @@ fn isqrt(n: u64) -> i64 {
     r as i64
 }
 
-fn modp(a: i64, p: u64) -> u64 {
+pub(crate) fn modp(a: i64, p: u64) -> u64 {
     a.rem_euclid(p as i64) as u64
 }
 
-fn inv(a: u64, p: u64) -> u64 {
+pub(crate) fn inv(a: u64, p: u64) -> u64 {
     let (mut b, mut e, mut r) = (a % p, p - 2, 1u64);
     while e > 0 {
         if e & 1 == 1 {
@@ -78,14 +78,14 @@ fn inv(a: u64, p: u64) -> u64 {
 }
 
 /// Reduced row echelon form in place (zero rows removed); the pivot columns.
-fn rref(m: &mut Vec<Vec<u64>>, p: u64) -> Vec<usize> {
+pub(crate) fn rref(m: &mut Vec<Vec<u64>>, p: u64) -> Vec<usize> {
     let (r, pivots) = linalg::rref_mod(std::mem::take(m), p);
     *m = r;
     pivots
 }
 
 /// A basis of {v : M v = 0} for M with `cols` columns.
-fn kernel(mut m: Vec<Vec<u64>>, cols: usize, p: u64) -> Vec<Vec<u64>> {
+pub(crate) fn kernel(mut m: Vec<Vec<u64>>, cols: usize, p: u64) -> Vec<Vec<u64>> {
     let pivots = rref(&mut m, p);
     let mut out = vec![];
     for free in (0..cols).filter(|c| !pivots.contains(c)) {
@@ -100,7 +100,7 @@ fn kernel(mut m: Vec<Vec<u64>>, cols: usize, p: u64) -> Vec<Vec<u64>> {
 }
 
 /// psi(T x) for the generator g, with T given by its Heilbronn matrices.
-fn heilbronn_pairing(pres: &Presentation, h: &[(i64, i64, i64, i64)], psi: &[u64], g: u32, p: u64) -> u64 {
+pub(crate) fn heilbronn_pairing(pres: &Presentation, h: &[(i64, i64, i64, i64)], psi: &[u64], g: u32, p: u64) -> u64 {
     let (i, s) = pres.sym_of_gen[g as usize];
     let (c, d) = pres.p1.get(i as usize);
     let (c, d) = (c as i64, d as i64);

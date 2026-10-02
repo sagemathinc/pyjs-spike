@@ -1,0 +1,9 @@
+[package]
+name = "sagebrush-flint"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-3.0-or-later"
+description = "Minimal FLINT bindings for Sagebrush (factoring in Z[x]); LGPL like FLINT itself"
+
+[dependencies]
+num-bigint = "0.4"
