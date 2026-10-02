@@ -46,7 +46,7 @@ pub struct Orbit {
     pub c: Vec<(u64, Vec<u64>)>,
 }
 
-fn mulmod(a: u64, b: u64, p: u64) -> u64 {
+pub(crate) fn mulmod(a: u64, b: u64, p: u64) -> u64 {
     (a as u128 * b as u128 % p as u128) as u64
 }
 
@@ -73,7 +73,7 @@ fn poly_div(a: &[u64], b: &[u64], p: u64) -> Vec<u64> {
     q
 }
 
-fn reduce(f: &[BigInt], p: u64) -> Vec<u64> {
+pub(crate) fn reduce(f: &[BigInt], p: u64) -> Vec<u64> {
     let pb = BigInt::from(p);
     f.iter().map(|c| ((c % &pb + &pb) % &pb).to_u64().unwrap()).collect()
 }
@@ -232,55 +232,61 @@ pub fn newform_orbits(n: u64, bound: u64, factor: Factorer) -> Result<Vec<Orbit>
     chosen.ok_or_else(|| format!("N = {}: no combination separated the new orbits", n))
 }
 
+/// A basis of ker f(T) on functionals mod p (f irreducible of exponent one
+/// in chi): the image of h(T) for h = chi / f is cyclic, spanned by
+/// u, Tu, ..., T^(k-1) u with u = h(T) v.  None if four random v fail.
+pub(crate) fn krylov_dual(t: &[Vec<u64>], chi_p: &[u64], f_p: &[u64], p: u64) -> Option<Vec<Vec<u64>>> {
+    let d = t.len();
+    let k = f_p.len() - 1;
+    let h = poly_div(chi_p, f_p, p);
+    for seed in 1..=4u64 {
+        // A pseudo-random vector (xorshift); an affine family in the seed
+        // would only span two fixed vectors.
+        let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ seed.wrapping_mul(0xD1B5_4A32_D192_ED03);
+        let v: Vec<u64> = (0..d)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                x % p
+            })
+            .collect();
+        let mut u = vec![0u64; d];
+        for &c in h.iter().rev() {
+            u = matvec(t, &u, p);
+            for (x, &vi) in u.iter_mut().zip(&v) {
+                *x = (*x + mulmod(c, vi, p)) % p;
+            }
+        }
+        let mut rows = vec![u];
+        for _ in 1..k {
+            let next = matvec(t, rows.last().unwrap(), p);
+            rows.push(next);
+        }
+        let (r, _) = linalg::rref_mod(rows, p);
+        if r.len() == k {
+            return Some(r);
+        }
+    }
+    None
+}
+
 /// The orbits for the chosen T, or None if a Krylov basis degenerates.
 #[allow(clippy::too_many_arguments)]
 fn build_orbits(n: u64, bound: u64, pres: &Presentation, sp: &Space, ops: &[(u64, i64)], chi: &[BigInt], t: &[Vec<u64>], fs: Vec<Vec<BigInt>>) -> Option<Vec<Orbit>> {
     let p = ELL;
-    let d = sp.dimension();
     let chi_p = reduce(&chi, p);
     let primes: Vec<u64> = (2..=bound).filter(|&l| is_prime(l) && n % l != 0).collect();
     let mut out = vec![];
     for f in fs {
         let k = f.len() - 1;
-        let h = poly_div(&chi_p, &reduce(&f, p), p);
-        // u = h(T) v by Horner, then the Krylov basis u, Tu, ..., T^(k-1) u.
-        let mut rows = vec![];
-        for seed in 1..=4u64 {
-            // A pseudo-random vector (xorshift); an affine family in the
-            // seed would only span two fixed vectors.
-            let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ seed.wrapping_mul(0xD1B5_4A32_D192_ED03);
-            let v: Vec<u64> = (0..d)
-                .map(|_| {
-                    x ^= x << 13;
-                    x ^= x >> 7;
-                    x ^= x << 17;
-                    x % p
-                })
-                .collect();
-            let mut u = vec![0u64; d];
-            for &c in h.iter().rev() {
-                u = matvec(&t, &u, p);
-                for (x, &vi) in u.iter_mut().zip(&v) {
-                    *x = (*x + mulmod(c, vi, p)) % p;
-                }
-            }
-            rows = vec![u];
-            for _ in 1..k {
-                let next = matvec(&t, rows.last().unwrap(), p);
-                rows.push(next);
-            }
-            let rank = linalg::rref_mod(rows.clone(), p).0.len();
-            if rank == k {
-                break;
-            }
-        }
-        let pivots = rref(&mut rows, p);
-        if rows.len() != k {
+        let Some(mut rows) = krylov_dual(t, &chi_p, &reduce(&f, p), p) else {
             if std::env::var("SAGEBRUSH_DEBUG").is_ok() {
-                eprintln!("  N={} T={:?}: factor {:?} of degree {} gives a Krylov basis of rank {}", n, ops, f, k, rows.len());
+                eprintln!("  N={} T={:?}: factor {:?} of degree {} gives a degenerate Krylov basis", n, ops, f, k);
             }
             return None;
-        }
+        };
+        let pivots = rref(&mut rows, p);
         let psis: Vec<Vec<u64>> = rows.iter().map(|w| sp.extend(w)).collect();
         let x = sp.basis_gen[pivots[0]];
         let data = par::map_slice(&primes, |&l| {

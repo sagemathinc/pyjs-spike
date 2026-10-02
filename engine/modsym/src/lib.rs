@@ -18,6 +18,7 @@ mod par;
 pub mod estimate;
 pub mod cusps;
 pub mod exact;
+pub mod integral;
 pub mod linalg;
 pub mod newforms;
 pub mod orbits;
