@@ -1,0 +1,43 @@
+# 8 x  AMD EPYC 7B13 | commit 68f4fb0
+== N q = 2003 97
+CPython 3.14               2.64 s      54 MB  charpoly_hash=577853878612607026
+PyPy 3.11                  0.54 s     100 MB  charpoly_hash=577853878612607026
+pyjs                       2.12 s     145 MB  charpoly_hash=577853878612607026
+Rust port (dense)          0.13 s      40 MB  charpoly_hash=577853878612607026
+engine CLI 1 thread        0.03 s       3 MB  charpoly_hash=577853878612607026
+engine CLI 8 threads       0.02 s       3 MB  charpoly_hash=577853878612607026
+engine via CPython         0.05 s      15 MB  charpoly_hash=577853878612607026
+engine WASM (Node)         0.11 s      58 MB  charpoly_hash=577853878612607026
+== N q = 5077 97
+CPython 3.14              30.35 s     272 MB  charpoly_hash=342336809202356427
+PyPy 3.11                  2.63 s     318 MB  charpoly_hash=342336809202356427
+pyjs                      19.48 s     387 MB  charpoly_hash=342336809202356427
+Rust port (dense)          1.13 s     248 MB  charpoly_hash=342336809202356427
+engine CLI 1 thread        0.43 s       8 MB  charpoly_hash=342336809202356427
+engine CLI 8 threads       0.14 s       8 MB  charpoly_hash=342336809202356427
+engine via CPython         0.17 s      20 MB  charpoly_hash=342336809202356427
+engine WASM (Node)         0.95 s      61 MB  charpoly_hash=342336809202356427
+== N q = 10007 97
+CPython 3.14             239.96 s    1013 MB  charpoly_hash=516435756442843772
+PyPy 3.11                 16.45 s    1060 MB  charpoly_hash=516435756442843772
+pyjs                     163.96 s    1558 MB  charpoly_hash=516435756442843772
+Rust port (dense)          4.90 s     957 MB  charpoly_hash=516435756442843772
+engine CLI 1 thread        2.90 s      26 MB  charpoly_hash=516435756442843772
+engine CLI 8 threads       0.53 s      26 MB  charpoly_hash=516435756442843772
+engine via CPython         0.55 s      38 MB  charpoly_hash=516435756442843772
+engine WASM (Node)         3.72 s      77 MB  charpoly_hash=516435756442843772
+== N q = 20011 97 (engine only)
+engine CLI 1 thread       40.90 s      89 MB  charpoly_hash=1744695135105278148
+engine CLI 8 threads       7.26 s      90 MB  charpoly_hash=1744695135105278148
+engine via CPython         7.22 s     101 MB  charpoly_hash=1744695135105278148
+engine WASM (Node)       114.20 s     149 MB  charpoly_hash=1744695135105278148
+== thread scaling, N=20011 q=97
+engine CLI 1 threads      71.36 s      89 MB  charpoly_hash=1744695135105278148
+engine CLI 2 threads      37.26 s      90 MB  charpoly_hash=1744695135105278148
+engine CLI 4 threads      17.63 s      90 MB  charpoly_hash=1744695135105278148
+engine CLI 8 threads       9.72 s      90 MB  charpoly_hash=1744695135105278148
+== exploration: 16 prime levels near 5000, T_2, from Python threads
+16 levels, 1 Python threads: 5.48 s; dims [417, 418, 418, 418, 419, 419, 421, 422, 422, 423, 424, 425, 426, 425, 426, 426]
+  wall 5.56 s, maxrss 25748 KB
+16 levels, 8 Python threads: 1.15 s; dims [417, 418, 418, 418, 419, 419, 421, 422, 422, 423, 424, 425, 426, 425, 426, 426]
+  wall 1.25 s, maxrss 66400 KB
