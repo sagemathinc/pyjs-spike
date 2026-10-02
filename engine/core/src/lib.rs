@@ -41,6 +41,7 @@ fn elapsed_ms(_: (), _: ()) -> f64 {
     0.0
 }
 
+#[derive(Debug, Clone)]
 pub struct ModP {
     pub n: u64,
     pub q: u64,

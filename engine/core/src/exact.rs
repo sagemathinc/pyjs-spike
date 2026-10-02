@@ -118,6 +118,7 @@ pub fn is_prime(n: u64) -> bool {
     true
 }
 
+#[derive(Debug, Clone)]
 pub struct Exact {
     pub n: u64,
     pub q: u64,
@@ -282,4 +283,65 @@ fn modpow(mut b: u64, mut e: u64, m: u64) -> u64 {
 /// levels; each entry is independent (an invalid level is an `Err`).
 pub fn batch_exact(levels: &[u64], q: u64) -> Vec<Result<Exact, String>> {
     par::map_slice(levels, |&n| exact_charpoly(n, q))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_prime_matches_trial_division() {
+        let slow = |n: u64| n >= 2 && (2..).take_while(|d| d * d <= n).all(|d| n % d != 0);
+        for n in 0..20000 {
+            assert_eq!(is_prime(n), slow(n), "{}", n);
+        }
+        for p in [2147483647u64, 2305843009213693951, 18446744073709551557] {
+            assert!(is_prime(p), "{}", p);
+        }
+        // Carmichael numbers and strong pseudoprimes to small bases.
+        for c in [561u64, 41041, 825265, 3215031751, 3825123056546413051] {
+            assert!(!is_prime(c), "{}", c);
+        }
+    }
+
+    #[test]
+    fn crt_recovers_signed_integers() {
+        let primes = [2147483647u64, 2147483629, 2147483587, 2147483579];
+        let values: Vec<BigInt> = ["0", "1", "-1", "123456789012345678901234567890", "-98765432109876543210987654321"]
+            .iter()
+            .map(|s| s.parse().unwrap())
+            .collect();
+        let residues: Vec<(u64, Vec<u64>)> = primes
+            .iter()
+            .map(|&p| {
+                let pb = BigInt::from(p);
+                (p, values.iter().map(|v| ((v % &pb + &pb) % &pb).to_u64().unwrap()).collect())
+            })
+            .collect();
+        assert_eq!(crt(&residues, values.len() - 1), values);
+    }
+
+    /// X0(N) has genus 0 exactly for these N (a classical list).
+    #[test]
+    fn genus_zero_levels() {
+        let zero: Vec<u64> = (1..=200).filter(|&n| level_data(n).1 == 0).collect();
+        assert_eq!(zero, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 16, 18, 25]);
+        assert_eq!(level_data(11).1, 1);
+        assert_eq!(level_data(37).1, 2);
+        assert_eq!(level_data(389).1, 32);
+    }
+
+    /// The sharpened bound is never weaker than Deligne's, and the result
+    /// actually fits in it.
+    #[test]
+    fn sharpened_bound_is_sound_and_no_weaker() {
+        for n in (11..400).step_by(7) {
+            let q = [2u64, 3, 5, 7, 11].into_iter().find(|q| n % q != 0).unwrap();
+            let e = exact_charpoly(n, q).unwrap();
+            assert_eq!(e.status, "proven", "N={}", n);
+            assert!(e.bound_bits <= bound_bits(q, e.genus, e.eis) + 1e-9, "N={}", n);
+            let max_bits = e.coeffs.iter().map(|c| c.abs().bits()).max().unwrap();
+            assert!((max_bits as f64) < e.bound_bits, "N={}", n);
+        }
+    }
 }

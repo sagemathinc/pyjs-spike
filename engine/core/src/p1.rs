@@ -65,7 +65,7 @@ pub struct P1List {
 
 impl P1List {
     pub fn new(n: u64) -> Self {
-        assert!(n >= 2, "N must be at least 2");
+        assert!(n >= 1, "N must be at least 1");
         let mut list = vec![(0u32, 1u32)];
         let mut div_pos = vec![u32::MAX; n as usize + 1];
         let mut tables = vec![];
@@ -103,5 +103,62 @@ impl P1List {
             return self.zero_index as usize;
         }
         self.tables[self.div_pos[u as usize] as usize][v as usize] as usize
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn psi(n: u64) -> u64 {
+        let mut r = n;
+        let mut m = n;
+        let mut p = 2;
+        while p * p <= m {
+            if m % p == 0 {
+                r = r / p * (p + 1);
+                while m % p == 0 {
+                    m /= p;
+                }
+            }
+            p += 1;
+        }
+        if m > 1 {
+            r = r / m * (m + 1);
+        }
+        r
+    }
+
+    #[test]
+    fn size_is_psi() {
+        for n in 1..300 {
+            assert_eq!(P1List::new(n).len() as u64, psi(n), "N={}", n);
+        }
+    }
+
+    /// Every (c, d) with gcd(c, d, N) = 1 indexes an element (u : v) with
+    /// (c, d) = l (u, v) mod N for a unit l (checked by brute force).
+    #[test]
+    fn index_finds_an_equivalent_element() {
+        for n in 1..40u64 {
+            let p1 = P1List::new(n);
+            for c in 0..n {
+                for d in 0..n {
+                    if gcd(gcd(c, d), n) != 1 {
+                        continue;
+                    }
+                    let (u, v) = p1.get(p1.index(c as i64, d as i64));
+                    let ok = (0..n.max(1)).any(|l| gcd(l, n) == 1 && (l * u) % n == c % n && (l * v) % n == d % n);
+                    assert!(ok, "N={} (c,d)=({},{}) -> ({},{})", n, c, d, u, v);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn index_accepts_negative_and_large_inputs() {
+        let p1 = P1List::new(30);
+        assert_eq!(p1.index(-1, 7), p1.index(29, 7));
+        assert_eq!(p1.index(31, -23), p1.index(1, 7));
     }
 }

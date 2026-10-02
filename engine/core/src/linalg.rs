@@ -300,3 +300,105 @@ pub fn matmul(a: &[Vec<u64>], b: &[Vec<u64>], p: u64) -> Vec<Vec<u64>> {
         out
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rng(seed: u64) -> impl FnMut() -> u64 {
+        let mut x = seed | 1;
+        move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        }
+    }
+
+    /// det(a) mod p by Gaussian elimination (an independent check).
+    fn det(mut a: Vec<Vec<u64>>, p: u64) -> u64 {
+        let n = a.len();
+        let mut d = 1u64;
+        for c in 0..n {
+            let Some(r) = (c..n).find(|&r| a[r][c] != 0) else { return 0 };
+            if r != c {
+                a.swap(r, c);
+                d = (p - d) % p;
+            }
+            d = (d as u128 * a[c][c] as u128 % p as u128) as u64;
+            let inv = powmod(a[c][c], p - 2, p);
+            for r in c + 1..n {
+                let f = (a[r][c] as u128 * inv as u128 % p as u128) as u64;
+                for k in c..n {
+                    let s = (a[c][k] as u128 * f as u128 % p as u128) as u64;
+                    a[r][k] = (a[r][k] + p - s) % p;
+                }
+            }
+        }
+        d
+    }
+
+    fn eval(f: &[u64], x: u64, p: u64) -> u64 {
+        f.iter().rev().fold(0u64, |acc, &c| ((acc as u128 * x as u128 + c as u128) % p as u128) as u64)
+    }
+
+    /// charpoly(A)(x) = det(x I - A) at several points, for dense, sparse
+    /// (pivot swaps and skipped steps) and block-diagonal matrices.
+    #[test]
+    fn charpoly_agrees_with_determinants() {
+        let mut r = rng(7);
+        for &p in &[3u64, 65537, 67108859, 2147483647] {
+            for &n in &[0usize, 1, 2, 3, 5, 9, 17, 40, 70] {
+                for density in [100u64, 30, 5] {
+                    let mut a: Vec<Vec<u64>> = (0..n).map(|_| (0..n).map(|_| if r() % 100 < density { r() % p } else { 0 }).collect()).collect();
+                    if density == 5 && n > 4 {
+                        for i in 0..n / 2 {
+                            for j in n / 2..n {
+                                a[i][j] = 0;
+                                a[j][i] = 0;
+                            }
+                        }
+                    }
+                    let f = charpoly(a.clone(), p);
+                    assert_eq!(f.len(), n + 1);
+                    assert_eq!(f[n], 1 % p);
+                    for _ in 0..3 {
+                        let x = r() % p;
+                        let m: Vec<Vec<u64>> = (0..n).map(|i| (0..n).map(|j| ((if i == j { x } else { 0 }) + p - a[i][j]) % p).collect()).collect();
+                        assert_eq!(eval(&f, x, p), det(m, p), "p={} n={} density={}", p, n, density);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The AVX2 and portable kernels compute the same thing.
+    #[test]
+    fn kernels_agree_with_portable_versions() {
+        let mut r = rng(11);
+        for &p in &[3u32, 65537, 2147483647] {
+            for len in 0..40 {
+                let y: Vec<u32> = (0..len).map(|_| (r() % p as u64) as u32).collect();
+                let w: Vec<u32> = (0..len).map(|_| (r() % p as u64) as u32).collect();
+                let ws: Vec<u32> = w.iter().map(|&w| shoup32(w, p)).collect();
+                let x0: Vec<u32> = (0..len).map(|_| (r() % p as u64) as u32).collect();
+                let (w1, w1s) = (w.first().copied().unwrap_or(1 % p), shoup32(w.first().copied().unwrap_or(1 % p), p));
+                let (mut a, mut b) = (x0.clone(), x0.clone());
+                sub_mul(&mut a, &y, w1, w1s, p);
+                sub_mul_generic(&mut b, &y, w1, w1s, p);
+                assert_eq!(a, b);
+                for (i, &v) in a.iter().enumerate() {
+                    assert_eq!(v as u64, (x0[i] as u64 + w1 as u64 * y[i] as u64) % p as u64);
+                }
+                let d = dot_lazy(&y, &w, &ws, p);
+                assert_eq!(d, dot_lazy_generic(&y, &w, &ws, p));
+                let exact: u64 = y.iter().zip(&w).map(|(&y, &w)| w as u64 * y as u64 % p as u64).sum::<u64>() % p as u64;
+                assert_eq!(d % p as u64, exact);
+                let (mut c, mut e) = (vec![5u64; len], vec![5u64; len]);
+                acc_mul(&mut c, &y, w1, w1s, p);
+                acc_mul_generic(&mut e, &y, w1, w1s, p);
+                assert_eq!(c, e);
+            }
+        }
+    }
+}
