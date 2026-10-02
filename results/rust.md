@@ -8,7 +8,7 @@ Python's `%`.  Release build with LTO.  All four print the same
 characteristic-polynomial hash.
 
 Measured on `bench-1` (8x AMD EPYC 7B13, dedicated): Rust 1.x stable,
-PyPy 7.3 (3.11.16), Node 26.5 (pyjs at commit 5b2a0f7-ish HEAD), CPython
+PyPy 7.3 (3.11.16), Node 26.5 (pyjs at commit ebbfd99), CPython
 3.14.8.  Compute time only (process startup excluded).
 
 | N | q | Rust | PyPy | pyjs | CPython |
