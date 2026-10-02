@@ -685,11 +685,11 @@ export function newException(cls: PyType, args: any[]): any {
   return e;
 }
 
-export function captureTraceback(e: any) {
-  if (e.$tb === undefined) {
+export function captureTraceback(e: any, force = false) {
+  if (e.$tb === undefined || force) {
     const holder: any = {};
     Error.captureStackTrace(holder, captureTraceback);
-    Object.defineProperty(e, "$tb", { value: holder, writable: true, enumerable: false });
+    Object.defineProperty(e, "$tb", { value: holder, writable: true, enumerable: false, configurable: true });
   }
 }
 
@@ -706,7 +706,7 @@ export function raiseExc(x: any, cause?: any): any {
     e.__cause__ = c;
     e.__suppress_context__ = true;
   }
-  captureTraceback(e);
+  captureTraceback(e, true);
   return e;
 }
 

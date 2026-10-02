@@ -583,9 +583,16 @@ export function richCompare(a: any, b: any, op: string): any {
   if (c !== undefined) return cmpResult(c, op);
   if (typeof a === "string" && typeof b === "string") return cmpResult(a < b ? -1 : a > b ? 1 : 0, op);
   if (Array.isArray(a) && Array.isArray(b) && (a as any).$t === (b as any).$t && (a as any).$cls === undefined && (b as any).$cls === undefined) return seqCmp(a, b, op);
-  if (a instanceof PySet && b instanceof PySet && (op === "__eq__" || op === "__ne__")) {
-    const same = a.$d.$m.size === b.$d.$m.size && setItems(a).every((v) => dictGet(b.$d, v) !== undefined);
-    return op === "__eq__" ? same : !same;
+  if (a instanceof PySet && b instanceof PySet && (a.$cls === T.set || a.$cls === T.frozenset) && (b.$cls === T.set || b.$cls === T.frozenset)) {
+    const na = a.$d.$m.size, nb = b.$d.$m.size;
+    switch (op) {
+      case "__eq__": return na === nb && setSubset(a, b);
+      case "__ne__": return !(na === nb && setSubset(a, b));
+      case "__le__": return setSubset(a, b);
+      case "__lt__": return na < nb && setSubset(a, b);
+      case "__ge__": return setSubset(b, a);
+      default: return na > nb && setSubset(b, a);
+    }
   }
   if (a instanceof PyBytes && b instanceof PyBytes) {
     const n = Math.min(a.n, b.n);
@@ -1097,9 +1104,50 @@ export function setItems(s: PySet): any[] {
   for (const k of s.$d.$m.keys()) out.push(dictKeyOf(s.$d, k));
   return out;
 }
+// Sets whose keys all normalize to JS primitives share one key space, so
+// set algebra can work on the underlying Map keys directly.
+const flat = (s: PySet) => s.$d.$buckets === null;
+
+export function setSubset(a: PySet, b: PySet): boolean {
+  if (a.$d.$m.size > b.$d.$m.size) return false;
+  if (flat(a) && flat(b)) {
+    const bm = b.$d.$m;
+    for (const k of a.$d.$m.keys()) if (!bm.has(k)) return false;
+    return true;
+  }
+  return setItems(a).every((v) => dictGet(b.$d, v) !== undefined);
+}
+
 export function setOp(a: PySet, b: PySet, op: string): PySet {
   const r = new PySet();
   r.$frozen = a.$frozen;
+  if (flat(a) && flat(b)) {
+    const am = a.$d.$m, bm = b.$d.$m, rm = r.$d.$m;
+    // Equal keys keep the version CPython keeps: union and difference take
+    // a's, intersection takes the smaller (iterated) set's.
+    const ao = a.$d.$orig, bo = b.$d.$orig;
+    let ro: Map<any, any> | null = null;
+    const add = (k: any, orig: Map<any, any> | null) => {
+      rm.set(k, true);
+      const o = orig?.get(k);
+      if (o !== undefined) (ro ??= new Map()).set(k, o);
+    };
+    if (op === "or") {
+      for (const k of am.keys()) add(k, ao);
+      for (const k of bm.keys()) if (!am.has(k)) add(k, bo);
+    } else if (op === "and") {
+      const aSmall = am.size <= bm.size;
+      const [x, y, xo] = aSmall ? [am, bm, ao] : [bm, am, bo];
+      for (const k of x.keys()) if (y.has(k)) add(k, xo);
+    } else if (op === "sub") {
+      for (const k of am.keys()) if (!bm.has(k)) add(k, ao);
+    } else {
+      for (const k of am.keys()) if (!bm.has(k)) add(k, ao);
+      for (const k of bm.keys()) if (!am.has(k)) add(k, bo);
+    }
+    r.$d.$orig = ro;
+    return r;
+  }
   if (op === "or") {
     for (const v of setItems(a)) setAdd(r, v);
     for (const v of setItems(b)) setAdd(r, v);

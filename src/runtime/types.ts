@@ -4,7 +4,7 @@ import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
-  bindMethod, bindArgs, callKw, callObj, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
+  bindMethod, bindArgs, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr } from "./format";
@@ -273,6 +273,9 @@ T.BaseException = BaseException;
 BaseException.$dict.set("__new__", pyfn(function __new__(cls: PyType, ...args: any[]) {
   const o = new cls.$ctor!();
   o.args = tuple(args);
+  // Exceptions raised by the runtime are thrown right after creation, so
+  // capture the stack now; `raise` re-captures at the raise site.
+  captureTraceback(o);
   return o;
 }, "__new__"));
 method(BaseException, "__init__", (self: any, ...args: any[]) => {
@@ -1125,8 +1128,8 @@ const setMethods = (cls: PyType, mutable: boolean) => {
   method(cls, "intersection", (s: O.PySet, ...others: any[]) => others.reduce((acc, o) => O.setOp(acc, asSet(o), "and"), O.setOp(s, O.newSet(), "or")));
   method(cls, "difference", (s: O.PySet, ...others: any[]) => others.reduce((acc, o) => O.setOp(acc, asSet(o), "sub"), O.setOp(s, O.newSet(), "or")));
   method(cls, "symmetric_difference", (s: O.PySet, o: any) => O.setOp(s, asSet(o), "xor"));
-  method(cls, "issubset", (s: O.PySet, o: any) => O.setItems(s).every((v) => dictGet(asSet(o).$d, v) !== undefined));
-  method(cls, "issuperset", (s: O.PySet, o: any) => O.toArray(o).every((v) => dictGet(s.$d, v) !== undefined));
+  method(cls, "issubset", (s: O.PySet, o: any) => O.setSubset(s, asSet(o)));
+  method(cls, "issuperset", (s: O.PySet, o: any) => O.setSubset(asSet(o), s));
   method(cls, "isdisjoint", (s: O.PySet, o: any) => O.toArray(o).every((v) => dictGet(s.$d, v) === undefined));
   method(cls, "__len__", (s: O.PySet) => s.$d.$m.size);
   method(cls, "__contains__", (s: O.PySet, x: any) => dictGet(s.$d, x) !== undefined);
