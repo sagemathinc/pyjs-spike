@@ -91,36 +91,48 @@ What it does **not** show:
 ## Status (day 1 of the two-week compiler)
 
 The compiler exists and runs the pyperformance subset.  `src/` has the
-tree-sitter frontend, scope analysis, emitter and runtime (about 9k lines of
-TypeScript); `lib/` has stdlib modules written in Python and compiled by
-pyjs.  Measured on the 16-CPU development host against CPython 3.14.4
-(`results/pyperformance-3.md`; one cold call, ~1 s warmup, median of five):
+tree-sitter frontend, scope analysis, emitter and runtime (about 10k lines
+of TypeScript); `lib/` has stdlib modules written in Python and compiled by
+pyjs.  Measured on `bench-1` (8x AMD EPYC 7B13, dedicated) against CPython
+3.14.8 (`results/pyperformance-bench1.md`; one cold call, ~1 s warmup,
+median of five):
 
-* **Warm: geometric mean 1.01x CPython over 21 benchmarks.** 13 are faster
-  than CPython (spectral_norm 0.42, scimark_fft 0.64, float 0.73, deltablue
-  0.78, hexiom 0.82, nbody 0.90, ...).  Every benchmark is within 2x except
-  pidigits (2.05x, V8 BigInt division).
-* **Cold (first call): misses 2x on short benchmarks**: deltablue 9.0x (3 ms
-  of work), unpack_sequence 6.2x, hexiom 4.7x, richards_super 2.4x,
-  meteor_contest 2.3x, sparse_mat_mult 2.3x, pidigits 2.2x.  On these the
-  first call is dominated by V8 tier-up and first-execution cache misses.
-  End to end the scripts are still competitive (deltablue: 190 ms total vs
-  CPython's 276 ms), but process startup is 81 ms vs 24 ms.
-* **Correctness:** every benchmark's output matches CPython; the
-  MicroPython corpus passes 338 of 511.  Most remaining failures are library
-  breadth (array/memoryview/struct/io/collections variants, exec/eval,
-  async), not the language core.
+* **Warm: geometric mean 0.99x CPython over 21 benchmarks.**  Faster than
+  CPython on 11 (spectral_norm 0.48, scimark_fft 0.63, float 0.70, deltablue
+  0.71, hexiom 0.76, scimark_sor 0.89, nqueens 0.96, ...).  Since that run,
+  meteor_contest went from 2.08x to 1.49x (set algebra on Map keys), so
+  every benchmark is now within 2x warm; the slowest are pidigits (1.8-2.0x,
+  V8 BigInt division), richards_super 1.75x and generators 1.2-1.6x.
+* **Cold (first call): misses 2x on short benchmarks**: deltablue 8.7x (its
+  whole run is 3 ms), unpack_sequence 4.4x, hexiom 4.3x, richards_super 2.9x,
+  sparse_mat_mult 2.5x.  The first call executes our generated JavaScript in
+  V8's interpreter before TurboFan optimizes it; profiling shows the time
+  spread over the generated code itself, not compilation or cache misses.
+  In absolute terms this is a one-time cost of tens of milliseconds per hot
+  function.  End to end the scripts remain competitive (deltablue: 190 ms
+  total vs CPython's 276 ms), but process startup is 81 ms vs 24 ms (Node
+  29 ms, runtime init 24 ms, tree-sitter WASM 20 ms).
+* **Correctness:** every benchmark matches CPython's results; the MicroPython
+  corpus passes 363 of 511.  Most remaining failures are library breadth
+  (memoryview, struct, io.BytesIO, collections, weakref) or out-of-scope
+  features (async), not the language core.  Uncaught exceptions print CPython
+  tracebacks with file, line and source.
 
 What made the difference, in order of impact: the representation and
 caches from step 0; a TypeScript `array` with typed storage; per-class
 caches (dunders, construction, `==` reducing to identity, class-receiver
 call sites) keyed on class version; native delegation for `yield from`;
-eager loops for generator expressions consumed by builtins; and
-statement-scoped temporaries.
+eager loops for generator expressions consumed by builtins; set algebra on
+Map keys; and statement-scoped temporaries.
 
 Known gaps: set iteration order differs from CPython's hash-table order;
-`str` uses UTF-16 indexing; no `exec`/`eval`, `async`, or metaclasses; int,
-str and float cannot be subclassed yet; `__dict__` is a snapshot.
+`str` uses UTF-16 indexing; no `async`, metaclasses, or int/str/float
+subclasses; generator close()/throw() edge cases; `__dict__` is a snapshot.
+
+**Provisional answer to the question:** yes on throughput -- compiled Python
+on V8 is at parity with CPython 3.14 in steady state, and faster on numeric
+and object-heavy code.  The open risk is first-run latency on very short
+workloads, which is a property of V8's tiering rather than of this design.
 
 ## Design validated by step 0
 
