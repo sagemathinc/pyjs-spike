@@ -178,7 +178,19 @@ export function repr(x: any): string {
   }
   if (x === Ellipsis) return "Ellipsis";
   if (x === NotImplemented) return "NotImplemented";
-  if (Array.isArray(x)) {
+  if (Array.isArray(x) && (x as any).$cls === undefined) return seqRepr(x);
+  const t = typeOf(x);
+  const f = lookupType(t, "__repr__");
+  if (f !== undefined) {
+    const r = f(x);
+    if (typeof r !== "string") raise(T.TypeError, `__repr__ returned non-string (type ${typeOf(r).$name})`);
+    return r;
+  }
+  return defaultRepr(x);
+}
+
+export function seqRepr(x: any[]): string {
+  {
     if (reprActive.has(x)) return (x as any).$t ? "(...)" : "[...]";
     reprActive.add(x);
     try {
@@ -188,14 +200,6 @@ export function repr(x: any): string {
       reprActive.delete(x);
     }
   }
-  const t = typeOf(x);
-  const f = lookupType(t, "__repr__");
-  if (f !== undefined) {
-    const r = f(x);
-    if (typeof r !== "string") raise(T.TypeError, `__repr__ returned non-string (type ${typeOf(r).$name})`);
-    return r;
-  }
-  return defaultRepr(x);
 }
 
 export function defaultRepr(x: any): string {

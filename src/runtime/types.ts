@@ -1,13 +1,13 @@
 // Builtin types and their methods.
 
 import {
-  checkArity, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
+  checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
   bindMethod, bindArgs, callKw, callObj, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
 } from "./object";
 import * as O from "./ops";
-import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr } from "./format";
+import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr } from "./format";
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
 export function method(cls: PyType, name: string, f: any, s: Signature | null = null) {
@@ -927,26 +927,47 @@ method(list, "sort", (a: any[], key: any = null, reverse: any = false) => {
   sortList(a, key, reverse);
   return null;
 }, sig(["self"], { kwonly: ["key", "reverse"] }));
-method(list, "__len__", (a: any[]) => a.length);
-method(list, "__getitem__", (a: any[], k: any) => O.getitem(a, k));
-method(list, "__setitem__", (a: any[], k: any, v: any) => (O.setitem(a, k, v), null));
-method(list, "__contains__", (a: any[], x: any) => O.contains(a, x));
-method(list, "__iter__", (a: any[]) => O.iter(a));
-method(list, "__eq__", (a: any[], b: any) => (Array.isArray(b) && !(b as any).$t ? O.eq(a, b) : NotImplemented));
-method(list, "__add__", (a: any[], b: any) => (Array.isArray(b) && !(b as any).$t ? a.concat(b) : NotImplemented));
-method(list, "__repr__", (a: any[]) => repr(a));
+// Subclass instances of list/tuple are plain arrays with an own $cls.
+list.$jsBase = ListLayout;
+tupleType.$jsBase = TupleLayout;
+method(list, "__init__", (a: any[], it: any = undefined) => {
+  const items = it === undefined ? [] : O.toArray(it);
+  a.length = 0;
+  for (const v of items) a.push(v);
+  return null;
+});
+tupleType.$dict.set("__new__", pyfn(function __new__(cls: PyType, it: any = undefined) {
+  const items = it === undefined ? [] : O.toArray(it);
+  if (cls === tupleType) return tuple(items);
+  const a = new cls.$ctor!();
+  for (const v of items) a.push(v);
+  return a;
+}, "__new__"));
+const seqOps = (cls: PyType, isTuple: boolean) => {
+  const same = (b: any) => Array.isArray(b) && !!(b as any).$t === isTuple;
+  for (const op of ["__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"]) method(cls, op, (a: any[], b: any) => (same(b) ? O.seqCmp(a, b, op) : NotImplemented));
+  method(cls, "__len__", (a: any[]) => a.length);
+  method(cls, "__getitem__", (a: any[], k: any) => O.arrGet(a, k));
+  method(cls, "__contains__", (a: any[], x: any) => O.arrContains(a, x));
+  method(cls, "__iter__", (a: any[]) => new O.ListIter(a));
+  method(cls, "__repr__", (a: any[]) => seqRepr(a));
+  method(cls, "__mul__", (a: any[], n: any) => (O.isPyInt(n) ? O.mul(isTuple ? tuple(a.slice()) : a.slice(), n) : NotImplemented));
+};
+seqOps(list, false);
+seqOps(tupleType, true);
+method(list, "__setitem__", (a: any[], k: any, v: any) => (O.arrSet(a, k, v), null));
+method(list, "__delitem__", (a: any[], k: any) => (O.arrDel(a, k), null));
+method(list, "__iadd__", (a: any[], b: any) => {
+  for (const v of O.toArray(b)) a.push(v);
+  return a;
+});
+method(list, "__add__", (a: any[], b: any) => (Array.isArray(b) && !(b as any).$t ? [...a, ...b] : NotImplemented));
 list.$dict.set("__hash__", null);
 
 method(tupleType, "index", (a: any[], x: any, start: any = undefined, end: any = undefined) => seqIndexOf(a, x, start, end, "tuple"));
 method(tupleType, "count", (a: any[], x: any) => a.filter((v) => O.eqBool(v, x)).length);
-method(tupleType, "__len__", (a: any[]) => a.length);
-method(tupleType, "__getitem__", (a: any[], k: any) => O.getitem(a, k));
-method(tupleType, "__contains__", (a: any[], x: any) => O.contains(a, x));
-method(tupleType, "__iter__", (a: any[]) => O.iter(a));
-method(tupleType, "__hash__", (a: any[]) => O.hashAny(a));
-method(tupleType, "__eq__", (a: any[], b: any) => (Array.isArray(b) && (b as any).$t ? O.eq(a, b) : NotImplemented));
-method(tupleType, "__add__", (a: any[], b: any) => (Array.isArray(b) && (b as any).$t ? tuple(a.concat(b)) : NotImplemented));
-method(tupleType, "__repr__", (a: any[]) => repr(a));
+method(tupleType, "__hash__", (a: any[]) => O.hashTupleOf(a));
+method(tupleType, "__add__", (a: any[], b: any) => (Array.isArray(b) && (b as any).$t ? tuple([...a, ...b]) : NotImplemented));
 
 // ------------------------------------------------------------------ dict
 
@@ -963,6 +984,17 @@ dict.$kw = (pos, names, values) => {
   return d;
 };
 bindClass(PyDict, dict);
+dict.$jsBase = PyDict;
+method(dict, "__init__", (d: PyDict, x: any = undefined) => {
+  if (x !== undefined) O.dictUpdate(d, x);
+  return null;
+});
+dict.$dict.get("__init__").$kw = (pos: any[], names: string[], values: any[]) => {
+  const d = pos[0];
+  if (pos.length > 1) O.dictUpdate(d, pos[1]);
+  names.forEach((n, i) => dictSet(d, n, values[i]));
+  return null;
+};
 
 // Live views over a dict: kind 0 keys, 1 values, 2 items.
 export class DictView {
@@ -1045,12 +1077,16 @@ dict.$dict.set("fromkeys", new PyClassMethod(pyfn((_c: any, keys: any, v: any = 
   return d;
 }, "fromkeys")));
 method(dict, "__len__", (d: PyDict) => d.$m.size);
-method(dict, "__getitem__", (d: PyDict, k: any) => O.getitem(d, k));
+method(dict, "__getitem__", (d: PyDict, k: any) => O.dictGetitem(d, k));
 method(dict, "__setitem__", (d: PyDict, k: any, v: any) => (dictSet(d, k, v), null));
-method(dict, "__delitem__", (d: PyDict, k: any) => (O.delitem(d, k), null));
+method(dict, "__delitem__", (d: PyDict, k: any) => {
+  if (!dictDelete(d, k)) throw T.KeyError(k);
+  return null;
+});
 method(dict, "__contains__", (d: PyDict, k: any) => dictGet(d, k) !== undefined);
 method(dict, "__iter__", (d: PyDict) => new O.DictIter(d, 0));
-method(dict, "__eq__", (d: PyDict, o: any) => (o instanceof PyDict ? O.eq(d, o) : NotImplemented));
+method(dict, "__eq__", (d: PyDict, o: any) => (o instanceof PyDict ? O.dictEquals(d, o) : NotImplemented));
+method(dict, "__ne__", (d: PyDict, o: any) => (o instanceof PyDict ? !O.dictEquals(d, o) : NotImplemented));
 method(dict, "__or__", (d: PyDict, o: any) => (o instanceof PyDict ? O.or(d, o) : NotImplemented));
 method(dict, "__repr__", (d: PyDict) => dictRepr(d));
 dict.$dict.set("__hash__", null);
@@ -1059,6 +1095,24 @@ dict.$dict.set("__hash__", null);
 
 const set = builtinType("set", [object], (x: any = undefined) => O.newSet(x));
 const frozenset = builtinType("frozenset", [object], (x: any = undefined) => (x instanceof O.PySet && x.$frozen ? x : O.newSet(x, true)));
+class FrozenBase extends O.PySet {
+  constructor() {
+    super();
+    this.$frozen = true;
+  }
+}
+set.$jsBase = O.PySet;
+frozenset.$jsBase = FrozenBase;
+method(set, "__init__", (s: O.PySet, it: any = undefined) => {
+  dictClear(s.$d);
+  if (it !== undefined) O.forEach(it, (v) => O.setAdd(s, v));
+  return null;
+});
+frozenset.$dict.set("__new__", pyfn(function __new__(cls: PyType, it: any = undefined) {
+  const s = cls === frozenset ? O.newSet(undefined, true) : new cls.$ctor!();
+  if (it !== undefined) O.forEach(it, (v) => O.setAdd(s, v));
+  return s;
+}, "__new__"));
 Object.defineProperty(O.PySet.prototype, "$cls", {
   get(this: O.PySet) {
     return this.$frozen ? frozenset : set;
@@ -1408,3 +1462,16 @@ export function builtinTypeFor(name: string, jsClass: any, module: string, call:
   bindClass(jsClass, t);
   return t;
 }
+
+// object.__class__ and object.__dict__ (a snapshot for now; writes through
+// __dict__ are not reflected).
+getset(object, "__class__", (o) => typeOf(o), (o, c) => {
+  if (!isType(c) || c.$ctor === null || !hasInstanceDict(o) || c.$jsBase !== null) raise(T.TypeError, "__class__ assignment only supported for mutable types or ModuleType subclasses");
+  Object.setPrototypeOf(o, c.$ctor!.prototype);
+});
+getset(object, "__dict__", (o) => {
+  if (!hasInstanceDict(o)) raise(T.AttributeError, `'${typeName(o)}' object has no attribute '__dict__'`);
+  const d = new PyDict();
+  for (const k of Object.keys(o)) if (k[0] !== "$" && !(Array.isArray(o) && /^\d+$/.test(k))) dictSet(d, k, o[k]);
+  return d;
+});

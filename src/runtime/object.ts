@@ -35,6 +35,8 @@ export interface PyType {
   $customGet: boolean;
   $customSet: boolean;
   $kw?: (pos: any[], names: string[], values: any[]) => any;
+  // JS class that instances of subclasses extend (list/tuple/dict/set layouts).
+  $jsBase?: any;
 }
 
 let versionCounter = 1;
@@ -96,21 +98,47 @@ export function objectType(name: string, bases: PyType[], dict: Map<string, any>
     return construct(cls, args);
   } as PyType;
   cls.$kw = (pos, names, values) => constructKw(cls, pos, names, values);
-  const proto = Object.create(null);
-  proto.$cls = cls;
-  const Ctor = function () {} as any;
-  Ctor.prototype = proto;
-  // V8 keeps a new prototype in slow dictionary mode until a named store on
-  // an instance updates an inline cache; do one now so `$cls` loads and
-  // negative lookups through the prototype are fast from the start.
-  new Ctor().$warm = 0;
-  cls.$ctor = Ctor;
+  // Subclasses of list/tuple/dict/set use a JS subclass of the runtime
+  // class (layout); everything else is an attribute-dict object.
+  let layout: any = null;
   for (const b of bases) {
-    if (b.$ctor === null && b !== T.object) raise(T.TypeError, `subclassing '${b.$name}' is not supported yet`);
+    if (b.$jsBase !== undefined && b.$jsBase !== null) {
+      if (layout !== null && layout !== b.$jsBase && !(b.$jsBase.prototype instanceof layout) && !(layout.prototype instanceof b.$jsBase)) raise(T.TypeError, "multiple bases have instance lay-out conflict");
+      if (layout === null || b.$jsBase.prototype instanceof layout) layout = b.$jsBase;
+    } else if (b.$ctor === null && b !== T.object) raise(T.TypeError, `subclassing '${b.$name}' is not supported yet`);
   }
+  let Ctor: any;
+  if (layout === ListLayout || layout === TupleLayout) {
+    // Plain arrays with an own `$cls`, so V8's fast array builtins still apply.
+    const isTuple = layout === TupleLayout;
+    Ctor = function () {
+      const a: any = [];
+      a.$cls = cls;
+      if (isTuple) a.$t = true;
+      return a;
+    };
+  } else if (layout !== null) {
+    Ctor = class extends layout {};
+    Object.defineProperty(Ctor.prototype, "$cls", { value: cls, writable: true, configurable: true });
+  } else {
+    const proto = Object.create(null);
+    proto.$cls = cls;
+    Ctor = function () {} as any;
+    Ctor.prototype = proto;
+    // V8 keeps a new prototype in slow dictionary mode until a named store
+    // on an instance updates an inline cache; do one now so `$cls` loads and
+    // negative lookups through the prototype are fast from the start.
+    new Ctor().$warm = 0;
+  }
+  cls.$ctor = Ctor;
+  cls.$jsBase = layout === null ? null : layout === ListLayout || layout === TupleLayout ? layout : Ctor;
   finishType(cls, name, bases, dict, module);
   return cls;
 }
+
+// Layout markers for subclasses of list and tuple (see objectType).
+export class ListLayout {}
+export class TupleLayout {}
 
 export function isType(x: any): x is PyType {
   return typeof x === "function" && x.$dict !== undefined;
@@ -295,13 +323,15 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
 // ------------------------------------------------------------------ construction
 
 function construct(cls: PyType, args: any[]): any {
-  const nw = lookupType(cls, "__new__");
+  let c = (cls as any).$ni;
+  if (c === undefined || c.ver !== cls.$ver) c = (cls as any).$ni = { ver: cls.$ver, nw: lookupType(cls, "__new__"), init: lookupType(cls, "__init__") };
+  const nw = c.nw;
   let o: any;
   if (nw !== undefined && nw !== objectNew) {
     o = nw(cls, ...args);
     if (!isinstance(o, cls)) return o;
   } else o = new cls.$ctor!();
-  const init = lookupType(cls, "__init__");
+  const init = c.init;
   if (init === objectInit) {
     if (args.length && (nw === undefined || nw === objectNew)) raise(T.TypeError, `${cls.$name}() takes no arguments`);
   } else {
@@ -474,6 +504,18 @@ export function delattr(o: any, name: string): void {
 // any change to a class or its bases bumps the version.
 
 function getattrMiss(o: any, name: string, S: any): any {
+  if (isType(o)) {
+    // Class attributes that are plain values or functions can be cached
+    // on (class, version); descriptors and type's own attributes cannot.
+    const v = getattr(o, name);
+    const d = lookupType(o, name);
+    if (d !== undefined && d === v && lookupType(T.type, name) === undefined && (typeof d !== "object" || d === null || lookupType(typeOf(d), "__get__") === undefined)) {
+      S.tc = o;
+      S.tv = o.$ver;
+      S.tval = v;
+    }
+    return v;
+  }
   if (o !== null && typeof o === "object" && o.$cls !== undefined) {
     const cls: PyType = o.$cls;
     if (!cls.$customGet && cls.$ctor !== null) {
@@ -533,6 +575,17 @@ const KIND_TYPE: Record<number, string> = { [BK_STR]: "str", [BK_LIST]: "list", 
 
 const CALL_WAYS = 4;
 function callMethodMiss(o: any, name: string, args: any[], S: any): any {
+  if (isType(o)) {
+    // Methods looked up on a class (functions, staticmethods, classmethods)
+    // are stable for a given class version.
+    const f = getattr(o, name);
+    if (typeof f === "function" && lookupType(T.type, name) === undefined) {
+      S.tc = o;
+      S.tv = o.$ver;
+      S.tf = f;
+    }
+    return callObj(f, args);
+  }
   if (o !== null && typeof o === "object" && o.$cls !== undefined) {
     const cls: PyType = o.$cls;
     if (!cls.$customGet && !(cls.$ctor !== null && hasOwn.call(o, name))) {
@@ -574,15 +627,15 @@ function fillCallSite(S: any, cls: PyType, fn: any) {
 const jsName = (name: string) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : "attr");
 
 export function siteGet(name: string): (o: any) => any {
-  const S = { c: null, v: -1, k: 0, val: undefined };
+  const S = { c: null, v: -1, k: 0, val: undefined, tc: null, tv: -1, tval: undefined };
   const p = JSON.stringify(name);
-  return new Function("S", "miss", `"use strict"; return function get_${jsName(name)}(o) {
+  return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {
   if (o != null && o.$cls === S.c && S.c.$ver === S.v) {
     if (S.k === 0) { const t = o[${p}]; if (t !== undefined) return t; }
-    else if (o[${p}] === undefined) return S.val;
-  }
+    else if (o[${p}] === undefined || (S.c.$jsBase !== null && !hasOwn.call(o, ${p}))) return S.val;
+  } else if (o === S.tc && o.$ver === S.tv) return S.tval;
   return miss(o, ${p}, S);
-};`)(S, getattrMiss);
+};`)(S, getattrMiss, hasOwn);
 }
 
 export function siteSet(name: string): (o: any, v: any) => void {
@@ -595,7 +648,7 @@ export function siteSet(name: string): (o: any, v: any) => void {
 }
 
 export function siteCall(name: string, n: number): (o: any, ...args: any[]) => any {
-  const S: any = { next: 0, bk: 0, bfn: null };
+  const S: any = { next: 0, bk: 0, bfn: null, tc: null, tv: -1, tf: null };
   for (let i = 0; i < CALL_WAYS; i++) {
     S["c" + i] = null;
     S["v" + i] = -1;
@@ -605,16 +658,17 @@ export function siteCall(name: string, n: number): (o: any, ...args: any[]) => a
   const c = n ? ", " : "";
   const p = JSON.stringify(name);
   const ways = Array.from({ length: CALL_WAYS }, (_, i) => `    if (k === S.c${i} && k.$ver === S.v${i}) return S.f${i}(o${c}${ps});`).join("\n");
-  return new Function("S", "miss", "kind", `"use strict"; return function call_${jsName(name)}(o${c}${ps}) {
+  return new Function("S", "miss", "kind", "hasOwn", `"use strict"; return function call_${jsName(name)}(o${c}${ps}) {
   if (o != null) {
     const k = o.$cls;
-    if (k !== undefined && o[${p}] === undefined) {
+    if (k !== undefined && (o[${p}] === undefined || (k.$jsBase !== null && !hasOwn.call(o, ${p})))) {
 ${ways}
     }
   }
+  if (o === S.tc && o.$ver === S.tv) return S.tf(${ps});
   if (S.bk !== 0 && kind(o) === S.bk) return S.bfn(o${c}${ps});
   return miss(o, ${p}, [${ps}], S);
-};`)(S, callMethodMiss, builtinKind);
+};`)(S, callMethodMiss, builtinKind, hasOwn);
 }
 
 // ------------------------------------------------------------------ exceptions
@@ -687,6 +741,7 @@ export function tuple(a: any[]): any[] {
 // Other keys hash to a number and live in per-hash buckets; their Map key is
 // the bucket entry, which keeps one insertion order for all keys.
 export class PyDict {
+  declare $cls: any; // on the prototype: dict, or a Python subclass
   $m = new Map<any, any>();
   $orig: Map<any, any> | null = null; // normalized -> original key, when they differ
   $buckets: Map<number, any[]> | null = null; // hash -> entries {k, h}

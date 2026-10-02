@@ -12,6 +12,22 @@ const isSafe = Number.isSafeInteger;
 const MINB = -9007199254740991n;
 const MAXB = 9007199254740991n;
 
+// Instances of Python subclasses of list/tuple/dict carry `$cls` on their
+// prototype; plain values take the fast paths.
+export const plainArr = (o: any): boolean => o.$cls === undefined;
+
+const LAYOUT_DUNDERS = ["__len__", "__getitem__", "__setitem__", "__delitem__", "__iter__", "__contains__", "__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__", "__add__", "__mul__", "__bool__", "__hash__", "__repr__"];
+// A subclass of list/tuple/dict/set that overrides none of the base type's
+// dunders behaves exactly like its base for the operator fast paths.
+export function layoutPlain(t: any): boolean {
+  if (t.$lpVer === t.$ver) return t.$lp;
+  const base = t.$mro.find((c: any) => c.$ctor === null && c.$jsBase !== undefined && c.$jsBase !== null);
+  t.$lpVer = t.$ver;
+  t.$lp = base !== undefined && LAYOUT_DUNDERS.every((n) => lookupType(t, n) === lookupType(base, n));
+  return t.$lp;
+}
+export const plainDict = (o: any): boolean => o.$cls === T.dict;
+
 export const normBig = (r: bigint): number | bigint => (r >= MINB && r <= MAXB ? Number(r) : r);
 export const mkfloat = (r: number): any => (isInt(r) ? new FloatBox(r) : r);
 export const fbox = (v: number) => new FloatBox(v);
@@ -538,7 +554,7 @@ function cmpResult(c: number, op: string): boolean {
   }
 }
 
-function seqCmp(a: any[], b: any[], op: string): any {
+export function seqCmp(a: any[], b: any[], op: string): any {
   const n = Math.min(a.length, b.length);
   for (let i = 0; i < n; i++) {
     if (a[i] === b[i] || eqBool(a[i], b[i])) continue;
@@ -553,7 +569,7 @@ export function richCompare(a: any, b: any, op: string): any {
   const c = numCmp(a, b);
   if (c !== undefined) return cmpResult(c, op);
   if (typeof a === "string" && typeof b === "string") return cmpResult(a < b ? -1 : a > b ? 1 : 0, op);
-  if (Array.isArray(a) && Array.isArray(b) && (a as any).$t === (b as any).$t) return seqCmp(a, b, op);
+  if (Array.isArray(a) && Array.isArray(b) && (a as any).$t === (b as any).$t && (a as any).$cls === undefined && (b as any).$cls === undefined) return seqCmp(a, b, op);
   if (a instanceof PySet && b instanceof PySet && (op === "__eq__" || op === "__ne__")) {
     const same = a.$d.$m.size === b.$d.$m.size && setItems(a).every((v) => dictGet(b.$d, v) !== undefined);
     return op === "__eq__" ? same : !same;
@@ -564,7 +580,7 @@ export function richCompare(a: any, b: any, op: string): any {
     for (let i = 0; i < n && c === 0; i++) c = a.a[i] - b.a[i];
     return cmpResult(c !== 0 ? c : a.n - b.n, op);
   }
-  if (a instanceof PyDict && b instanceof PyDict && (op === "__eq__" || op === "__ne__")) {
+  if (a instanceof PyDict && b instanceof PyDict && a.$cls === T.dict && b.$cls === T.dict && (op === "__eq__" || op === "__ne__")) {
     const same = dictEquals(a, b);
     return op === "__eq__" ? same : !same;
   }
@@ -588,7 +604,7 @@ export function richCompare(a: any, b: any, op: string): any {
   raise(T.TypeError, `'${SYM[op]}' not supported between instances of '${ta.$name}' and '${tb.$name}'`);
 }
 
-function dictEquals(a: PyDict, b: PyDict): boolean {
+export function dictEquals(a: PyDict, b: PyDict): boolean {
   if (a.$m.size !== b.$m.size) return false;
   for (const [k, v] of a.$m) {
     const w = dictGet(b, dictKeyOf(a, k));
@@ -613,13 +629,32 @@ export function eq(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return a === b;
   if (typeof a === "string" && typeof b === "string") return a === b;
   if (a === null && b === null) return true;
+  if (identityEq(a, b)) return a === b;
   return richCompare(a, b, "__eq__");
 }
 export function ne(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return a !== b;
   if (typeof a === "string" && typeof b === "string") return a !== b;
   if (a === null && b === null) return false;
+  if (identityEq(a, b)) return a !== b;
   return richCompare(a, b, "__ne__");
+}
+
+// True when == between a and b reduces to identity: both are instances of
+// Python classes (or None) whose __eq__/__ne__ are object's.
+function identityEq(a: any, b: any): boolean {
+  if (a === null || typeof a !== "object" || (b !== null && typeof b !== "object")) return false;
+  const ta = a.$cls;
+  if (ta === undefined || ta.$ctor === null || ta.$jsBase !== null || !defaultEq(ta)) return false;
+  if (b === null) return true;
+  const tb = b.$cls;
+  return tb !== undefined && tb.$ctor !== null && tb.$jsBase === null && defaultEq(tb);
+}
+function defaultEq(t: any): boolean {
+  if (t.$eqVer === t.$ver) return t.$eqDefault;
+  t.$eqVer = t.$ver;
+  t.$eqDefault = lookupType(t, "__eq__") === objectEq && lookupType(t, "__ne__") === objectNe;
+  return t.$eqDefault;
 }
 // Equality as a JS boolean, with Python's identity shortcut for containers.
 export function eqBool(a: any, b: any): boolean {
@@ -631,17 +666,18 @@ export function is(a: any, b: any): boolean {
 }
 
 // `x in c`
+export function arrContains(c: any[], x: any): boolean {
+  for (let i = 0; i < c.length; i++) if (c[i] === x || eqBool(c[i], x)) return true;
+  return false;
+}
 export function contains(c: any, x: any): boolean {
-  if (Array.isArray(c)) {
-    for (let i = 0; i < c.length; i++) if (c[i] === x || eqBool(c[i], x)) return true;
-    return false;
-  }
+  if (Array.isArray(c) && ((c as any).$cls === undefined || layoutPlain((c as any).$cls))) return arrContains(c, x);
   if (typeof c === "string") {
     if (typeof x !== "string") raise(T.TypeError, `'in <string>' requires string as left operand, not ${typeName(x)}`);
     return c.includes(x);
   }
-  if (c instanceof PyDict) return dictGet(c, x) !== undefined;
-  if (c instanceof PySet) return dictGet(c.$d, x) !== undefined;
+  if (c instanceof PyDict && c.$cls === T.dict) return dictGet(c, x) !== undefined;
+  if (c instanceof PySet && (c.$cls === T.set || c.$cls === T.frozenset)) return dictGet(c.$d, x) !== undefined;
   if (c instanceof PyBytes) {
     if (isPyInt(x)) return c.a.subarray(0, c.n).includes(Number(x));
     if (!(x instanceof PyBytes)) raise(T.TypeError, `a bytes-like object is required, not '${typeName(x)}'`);
@@ -667,9 +703,8 @@ function truthSlow(x: any): boolean {
   if (typeof x === "string") return x.length !== 0;
   if (typeof x === "bigint") return x !== 0n;
   if (x instanceof FloatBox) return x.v !== 0;
-  if (Array.isArray(x)) return x.length !== 0;
-  if (x instanceof PyDict) return x.$m.size !== 0;
-  if (x instanceof PySet) return x.$d.$m.size !== 0;
+  if (Array.isArray(x) && ((x as any).$cls === undefined || layoutPlain((x as any).$cls))) return x.length !== 0;
+  if (x instanceof PyDict && (x.$cls === T.dict || layoutPlain(x.$cls))) return x.$m.size !== 0;
   if (x instanceof PyBytes) return x.n !== 0;
   if (typeof x === "function") return true;
   const t = typeOf(x);
@@ -686,9 +721,9 @@ function truthSlow(x: any): boolean {
 
 export function len(x: any): number {
   if (typeof x === "string") return x.length;
-  if (Array.isArray(x)) return x.length;
-  if (x instanceof PyDict) return x.$m.size;
-  if (x instanceof PySet) return x.$d.$m.size;
+  if (Array.isArray(x) && ((x as any).$cls === undefined || layoutPlain((x as any).$cls))) return x.length;
+  if (x instanceof PyDict && (x.$cls === T.dict || layoutPlain(x.$cls))) return x.$m.size;
+  if (x instanceof PySet && (x.$cls === T.set || x.$cls === T.frozenset)) return x.$d.$m.size;
   if (x instanceof PyBytes) return x.n;
   const f = special(x, "__len__");
   if (f !== undefined) {
@@ -779,7 +814,7 @@ export function hashAny(x: any): number {
   }
   if (x === null) return 0x5f5e1;
   if (x instanceof FloatBox) return hashFloat(x.v);
-  if (Array.isArray(x)) {
+  if (Array.isArray(x) && (x as any).$cls === undefined) {
     if ((x as any).$t !== true) raise(T.TypeError, "unhashable type: 'list'");
     return hashTuple(x);
   }
@@ -795,6 +830,9 @@ export function hashAny(x: any): number {
   return id(x) / 32;
 }
 
+export function hashTupleOf(a: any[]): number {
+  return hashTuple(a);
+}
 // CPython's tuplehash (xxHash-based) on 64-bit lanes.
 function hashTuple(a: any[]): number {
   const P1 = 11400714785074694791n, P2 = 14029467366897019727n, P5 = 2870177450012600261n, M = (1n << 64n) - 1n;
@@ -935,12 +973,12 @@ function isExc(e: any, cls: PyType): boolean {
 const isGen = (x: any) => x !== null && typeof x === "object" && x[Symbol.toStringTag] === "Generator";
 
 export function iter(x: any): any {
-  if (Array.isArray(x)) return new ListIter(x);
+  if (Array.isArray(x) && ((x as any).$cls === undefined || layoutPlain((x as any).$cls))) return new ListIter(x);
   if (typeof x === "string") return new StrIter(x);
   if (x !== null && typeof x === "object") {
     if (typeof x.$next === "function") return x;
-    if (x instanceof PyDict) return new DictIter(x, 0);
-    if (x instanceof PySet) return new DictIter(x.$d, 0);
+    if (x instanceof PyDict && x.$cls === T.dict) return new DictIter(x, 0);
+    if (x instanceof PySet && (x.$cls === T.set || x.$cls === T.frozenset)) return new DictIter(x.$d, 0);
     if (x instanceof PyBytes) return new BytesIter(x);
     if (isGen(x)) return new GenIter(x);
     const f = special(x, "__iter__");
@@ -1029,6 +1067,7 @@ export function unpackEx(x: any, before: number, after: number): any[] {
 
 // A set is a dict whose values are all `true`.
 export class PySet {
+  declare $cls: any;
   $d = new PyDict();
   $frozen = false;
 }
@@ -1142,7 +1181,19 @@ export function seqIndex(i: any, len: number, what: string): number {
 }
 
 export function getitem(o: any, k: any): any {
-  if (Array.isArray(o)) {
+  if (Array.isArray(o) && (o as any).$cls === undefined) {
+    if (typeof k === "number" && k >= 0 && k < o.length && isInt(k)) return o[k];
+    return arrGet(o, k);
+  }
+  if (o instanceof PyDict && o.$cls === T.dict) {
+    const v = dictGet(o, k);
+    if (v !== undefined) return v;
+    throw T.KeyError(k);
+  }
+  return getitemSlow(o, k);
+}
+export function arrGet(o: any[], k: any): any {
+  {
     if (typeof k === "number" && k >= 0 && k < o.length && isInt(k)) return o[k];
     if (k instanceof PySlice) {
       const [start, step, n] = sliceIndices(k, o.length);
@@ -1152,10 +1203,16 @@ export function getitem(o: any, k: any): any {
     }
     return o[seqIndex(k, o.length, (o as any).$t === true ? "tuple" : "list")];
   }
-  if (o instanceof PyDict) {
-    const v = dictGet(o, k);
-    if (v !== undefined) return v;
-    return dictMissing(o, k);
+}
+export function dictGetitem(o: PyDict, k: any): any {
+  const v = dictGet(o, k);
+  if (v !== undefined) return v;
+  return dictMissing(o, k);
+}
+function getitemSlow(o: any, k: any): any {
+  if (Array.isArray(o) || o instanceof PyDict) {
+    const f = special(o, "__getitem__");
+    return f(o, k);
   }
   if (o instanceof PyBytes) {
     if (typeof k === "number" && k >= 0 && k < o.n && isInt(k)) return o.a[k];
@@ -1220,8 +1277,14 @@ function bytearraySetSlice(o: PyByteArray, k: PySlice, v: any) {
   for (let i = 0, j = start; i < n; i++, j += step) a[j] = src[i];
 }
 
+export function arrSet(o: any[], k: any, v: any): void {
+  if (typeof k === "number" && k >= 0 && k < o.length && isInt(k)) o[k] = v;
+  else if (k instanceof PySlice) setSlice(o, k, v);
+  else o[seqIndex(k, o.length, "list")] = v;
+}
+
 export function setitem(o: any, k: any, v: any): void {
-  if (Array.isArray(o) && (o as any).$t !== true) {
+  if (Array.isArray(o) && (o as any).$t !== true && (o as any).$cls === undefined) {
     if (typeof k === "number" && k >= 0 && k < o.length && isInt(k)) {
       o[k] = v;
       return;
@@ -1230,7 +1293,7 @@ export function setitem(o: any, k: any, v: any): void {
     o[seqIndex(k, o.length, "list")] = v;
     return;
   }
-  if (o instanceof PyDict) {
+  if (o instanceof PyDict && o.$cls === T.dict) {
     dictSet(o, k, v);
     return;
   }
@@ -1259,7 +1322,20 @@ function setSlice(o: any[], k: PySlice, v: any) {
 }
 
 export function delitem(o: any, k: any): void {
-  if (Array.isArray(o) && (o as any).$t !== true) {
+  if (Array.isArray(o) && (o as any).$t !== true && (o as any).$cls === undefined) return arrDel(o, k);
+  if (o instanceof PyDict && o.$cls === T.dict) {
+    if (!dictDelete(o, k)) throw T.KeyError(k);
+    return;
+  }
+  const f = special(o, "__delitem__");
+  if (f !== undefined) {
+    f(o, k);
+    return;
+  }
+  raise(T.TypeError, `'${typeName(o)}' object doesn't support item deletion`);
+}
+export function arrDel(o: any[], k: any): void {
+  {
     if (k instanceof PySlice) {
       const [start, step, n] = sliceIndices(k, o.length);
       if (step === 1) o.splice(start, n);
@@ -1275,16 +1351,6 @@ export function delitem(o: any, k: any): void {
     o.splice(seqIndex(k, o.length, "list"), 1);
     return;
   }
-  if (o instanceof PyDict) {
-    if (!dictDelete(o, k)) throw T.KeyError(k);
-    return;
-  }
-  const f = special(o, "__delitem__");
-  if (f !== undefined) {
-    f(o, k);
-    return;
-  }
-  raise(T.TypeError, `'${typeName(o)}' object doesn't support item deletion`);
 }
 
 // `str % args`, filled in by format.ts.
