@@ -193,3 +193,18 @@ pub fn charpoly(mut h: Vec<Vec<u64>>, p: u64) -> Vec<u64> {
     }
     polys.pop().unwrap()
 }
+
+pub fn matmul(a: &[Vec<u64>], b: &[Vec<u64>], p: u64) -> Vec<Vec<u64>> {
+    let n = b.first().map_or(0, |r| r.len());
+    par::map_slice(a, |row| {
+        let mut out = vec![0u64; n];
+        for (k, &x) in row.iter().enumerate() {
+            if x != 0 {
+                for (o, &y) in out.iter_mut().zip(&b[k]) {
+                    *o = (*o + x * y) % p;
+                }
+            }
+        }
+        out
+    })
+}

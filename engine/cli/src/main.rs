@@ -1,22 +1,63 @@
-//! modsym-engine N q [p] [--threads T]   (T = 0: all cores)
+//! modsym-engine N q [p] [--threads T] [--exact] [--commute r] [--level]
+//!
+//! Default: characteristic polynomial of T_q mod p (prints a hash).
+//! --exact: the characteristic polynomial over Z, with its status.
+//! --commute r: check T_q T_r == T_r T_q mod p.
+//! --level: genus, cusps and dimension from the formulas only.
+
+fn take_flag(args: &mut Vec<String>, name: &str) -> bool {
+    match args.iter().position(|a| a == name) {
+        Some(i) => {
+            args.remove(i);
+            true
+        }
+        None => false,
+    }
+}
+
+fn take_value(args: &mut Vec<String>, name: &str) -> Option<String> {
+    let i = args.iter().position(|a| a == name)?;
+    let v = args[i + 1].clone();
+    args.drain(i..i + 2);
+    Some(v)
+}
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let mut threads = 0usize;
-    if let Some(i) = args.iter().position(|a| a == "--threads") {
-        threads = args[i + 1].parse().unwrap();
-        args.drain(i..i + 2);
-    }
+    let threads: usize = take_value(&mut args, "--threads").map_or(0, |s| s.parse().unwrap());
+    let commute: Option<u64> = take_value(&mut args, "--commute").map(|s| s.parse().unwrap());
+    let exact = take_flag(&mut args, "--exact");
+    let level = take_flag(&mut args, "--level");
     let n: u64 = args.first().map_or(389, |s| s.parse().unwrap());
     let q: u64 = args.get(1).map_or(2, |s| s.parse().unwrap());
     let p: u64 = args.get(2).map_or(67108859, |s| s.parse().unwrap());
     let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
-    if std::env::var("MODSYM_DEBUG").is_ok() {
-        let ms = modsym_core::ModularSymbols::new(n, p);
-        let t = ms.hecke_matrix(q);
-        eprintln!("relation failures: {:?}", ms.check_relations().iter().take(5).collect::<Vec<_>>());
-        eprintln!("basis symbols: {:?}", ms.basis_symbols().iter().map(|&(i, s)| (ms.p1.get(i as usize), s)).collect::<Vec<_>>());
-        eprintln!("T_{} = {:?}", q, t.iter().map(|r| r.iter().map(|&x| if x > p / 2 { x as i64 - p as i64 } else { x as i64 }).collect::<Vec<_>>()).collect::<Vec<_>>());
+    let t = std::time::Instant::now();
+    if level {
+        let (psi, g, c, d) = modsym_core::exact::level_data(n);
+        println!("N={} psi={} genus={} cusps={} dim={}", n, psi, g, c, d);
+        return;
+    }
+    if let Some(r) = commute {
+        let ok = pool.install(|| modsym_core::hecke_commute(n, q, r, p));
+        println!("N={} T_{} T_{} commute mod {}: {} ({:.0} ms)", n, q, r, p, ok, t.elapsed().as_secs_f64() * 1000.0);
+        return;
+    }
+    if exact {
+        match pool.install(|| modsym_core::exact::exact_charpoly(n, q)) {
+            Err(e) => eprintln!("error: {}", e),
+            Ok(e) => {
+                let shown: Vec<String> = e.coeffs.iter().map(|c| c.to_string()).collect();
+                let poly = if shown.len() <= 12 { shown.join(", ") } else { format!("{}, ..., {}", shown[..4].join(", "), shown[shown.len() - 4..].join(", ")) };
+                println!("N={} q={} genus={} cusps={} dim={} status={}", e.n, e.q, e.genus, e.cusps, e.dim, e.status);
+                println!("charpoly (constant term first): [{}]", poly);
+                println!("primes used {} (rejected {:?}), bound {:.0} bits; {:.0} ms on {} threads", e.primes_used.len(), e.primes_rejected, e.bound_bits, t.elapsed().as_secs_f64() * 1000.0, pool.current_num_threads());
+                for c in &e.checks {
+                    println!("  check: {}", c);
+                }
+            }
+        }
+        return;
     }
     let r = pool.install(|| modsym_core::hecke_charpoly(n, q, p));
     println!(
