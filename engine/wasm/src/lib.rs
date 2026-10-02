@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn hecke_charpoly(n: u32, q: u32, p: u32) -> String {
-    let r = match modsym_core::hecke_charpoly(n as u64, q as u64, p as u64) {
+    let r = match sagebrush_modsym::hecke_charpoly(n as u64, q as u64, p as u64) {
         Ok(r) => r,
         Err(e) => return format!("{{\"error\":{:?}}}", e),
     };

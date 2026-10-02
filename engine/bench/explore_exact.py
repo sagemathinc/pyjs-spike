@@ -15,7 +15,7 @@ import flint
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-import modsym_engine as m
+from sagebrush import modsym as m
 
 top = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
 q = int(sys.argv[2]) if len(sys.argv) > 2 else 2

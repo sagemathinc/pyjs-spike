@@ -1,14 +1,14 @@
 [package]
-name = "modsym-node"
+name = "sagebrush-node"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "modsym_engine_node"
+name = "sagebrush_node"
 crate-type = ["cdylib"]
 
 [dependencies]
-modsym-core = { path = "../core" }
+sagebrush-modsym = { path = "../modsym" }
 rayon = "1.10"
 num-bigint = "0.4"
 napi = { version = "2", default-features = false, features = ["napi6"] }

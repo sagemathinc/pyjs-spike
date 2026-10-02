@@ -1,4 +1,4 @@
 #!/bin/sh
-# IPython with the engine preloaded as `m` (build: see TRY.md).
+# IPython with Sagebrush loaded: `sagebrush`, and `m` = sagebrush.modsym.
 cd "$(dirname "$0")"
-exec .venv/bin/ipython -i -c "import modsym_engine as m; print('modsym_engine loaded as m:', ', '.join(f for f in dir(m) if not f.startswith('_')))"
+exec .venv/bin/ipython -i -c "import sagebrush; from sagebrush import modsym as m; print('sagebrush loaded; m = sagebrush.modsym:', ', '.join(m.__all__))"

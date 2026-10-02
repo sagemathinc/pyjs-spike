@@ -1,14 +1,14 @@
 [package]
-name = "modsym-py"
+name = "sagebrush-py"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "modsym_engine"
+name = "sagebrush_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-modsym-core = { path = "../core" }
+sagebrush-modsym = { path = "../modsym" }
 rayon = "1.10"
 pyo3 = { version = "0.27", features = ["extension-module", "num-bigint"] }
 num-bigint = "0.4"

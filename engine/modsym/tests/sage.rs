@@ -1,7 +1,7 @@
 //! Exact characteristic polynomials against Sage: fixtures/sage_charpolys.txt
 //! (regenerate with `sage fixtures/make_sage_charpolys.sage`).
 
-use modsym_core::exact::exact_charpoly;
+use sagebrush_modsym::exact::exact_charpoly;
 use num_bigint::BigInt;
 
 #[test]

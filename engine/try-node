@@ -1,4 +1,4 @@
 #!/bin/sh
-# Node REPL with the engine preloaded as `m` (build: see TRY.md).
+# Node REPL with Sagebrush loaded: `sagebrush`, and `m` = sagebrush.modsym.
 cd "$(dirname "$0")"
-exec node -i -e 'globalThis.m = require("./node"); console.log("modsym_engine loaded as m:", Object.keys(m).join(", "))'
+exec node -i -e 'globalThis.sagebrush = require("./node"); globalThis.m = sagebrush.modsym; console.log("sagebrush loaded; m = sagebrush.modsym:", Object.keys(m).join(", "))'

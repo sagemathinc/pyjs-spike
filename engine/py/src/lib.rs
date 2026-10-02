@@ -1,8 +1,9 @@
-//! CPython bindings.  Computations release the GIL, so Python threads can
-//! run several in parallel; each call also uses `threads` worker threads
-//! (0 = all cores).  Invalid arguments raise ValueError.
+//! CPython bindings: the `sagebrush._native` extension.  Computations
+//! release the GIL, so Python threads can run several in parallel; each call
+//! also uses `threads` worker threads (0 = all cores).  Invalid arguments
+//! raise ValueError.
 
-use modsym_core::exact::Exact;
+use sagebrush_modsym::exact::Exact;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -19,7 +20,7 @@ fn err(e: String) -> PyErr {
 #[pyfunction]
 #[pyo3(signature = (n, q, p=67108859, threads=0))]
 fn hecke_charpoly<'py>(py: Python<'py>, n: u64, q: u64, p: u64, threads: usize) -> PyResult<Bound<'py, PyDict>> {
-    let r = run(py, threads, || modsym_core::hecke_charpoly(n, q, p)).map_err(err)?;
+    let r = run(py, threads, || sagebrush_modsym::hecke_charpoly(n, q, p)).map_err(err)?;
     let d = PyDict::new(py);
     d.set_item("symbols", r.symbols)?;
     d.set_item("gens", r.gens)?;
@@ -51,7 +52,7 @@ fn exact_dict<'py>(py: Python<'py>, e: &Exact) -> PyResult<Bound<'py, PyDict>> {
 #[pyfunction]
 #[pyo3(signature = (n, q, threads=0))]
 fn charpoly_exact<'py>(py: Python<'py>, n: u64, q: u64, threads: usize) -> PyResult<Bound<'py, PyDict>> {
-    let e = run(py, threads, || modsym_core::exact::exact_charpoly(n, q)).map_err(err)?;
+    let e = run(py, threads, || sagebrush_modsym::exact::exact_charpoly(n, q)).map_err(err)?;
     exact_dict(py, &e)
 }
 
@@ -59,7 +60,7 @@ fn charpoly_exact<'py>(py: Python<'py>, n: u64, q: u64, threads: usize) -> PyRes
 #[pyfunction]
 #[pyo3(signature = (levels, q, threads=0))]
 fn batch_exact<'py>(py: Python<'py>, levels: Vec<u64>, q: u64, threads: usize) -> PyResult<Vec<Bound<'py, PyDict>>> {
-    let rs = run(py, threads, || modsym_core::exact::batch_exact(&levels, q));
+    let rs = run(py, threads, || sagebrush_modsym::exact::batch_exact(&levels, q));
     levels
         .iter()
         .zip(rs)
@@ -78,7 +79,7 @@ fn batch_exact<'py>(py: Python<'py>, levels: Vec<u64>, q: u64, threads: usize) -
 /// Psi(N), genus, cusps, Eisenstein dimension and dimension of the sign +1 space.
 #[pyfunction]
 fn level_data<'py>(py: Python<'py>, n: u64) -> PyResult<Bound<'py, PyDict>> {
-    let (psi, g, c, e, dim) = modsym_core::exact::level_data(n);
+    let (psi, g, c, e, dim) = sagebrush_modsym::exact::level_data(n);
     let d = PyDict::new(py);
     d.set_item("psi", psi)?;
     d.set_item("genus", g)?;
@@ -92,14 +93,14 @@ fn level_data<'py>(py: Python<'py>, n: u64) -> PyResult<Bound<'py, PyDict>> {
 #[pyfunction]
 #[pyo3(signature = (n, q, r, p=67108859, threads=0))]
 fn commute(py: Python<'_>, n: u64, q: u64, r: u64, p: u64, threads: usize) -> PyResult<bool> {
-    run(py, threads, || modsym_core::hecke_commute(n, q, r, p)).map_err(err)
+    run(py, threads, || sagebrush_modsym::hecke_commute(n, q, r, p)).map_err(err)
 }
 
 /// Predicted dimension, bytes and single-thread seconds, without computing.
 #[pyfunction]
 fn estimate<'py>(py: Python<'py>, n: u64, q: u64) -> PyResult<Bound<'py, PyDict>> {
-    modsym_core::validate(n, q, None).map_err(err)?;
-    let e = modsym_core::estimate::estimate(n, q);
+    sagebrush_modsym::validate(n, q, None).map_err(err)?;
+    let e = sagebrush_modsym::estimate::estimate(n, q);
     let d = PyDict::new(py);
     d.set_item("symbols", e.symbols)?;
     d.set_item("dim", e.dim)?;
@@ -113,12 +114,16 @@ fn estimate<'py>(py: Python<'py>, n: u64, q: u64) -> PyResult<Bound<'py, PyDict>
     Ok(d)
 }
 
+/// The native extension, `sagebrush._native`; each engine is a submodule,
+/// re-exported by the pure-Python package (python/sagebrush).
 #[pymodule]
-fn modsym_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(hecke_charpoly, m)?)?;
-    m.add_function(wrap_pyfunction!(charpoly_exact, m)?)?;
-    m.add_function(wrap_pyfunction!(batch_exact, m)?)?;
-    m.add_function(wrap_pyfunction!(level_data, m)?)?;
-    m.add_function(wrap_pyfunction!(commute, m)?)?;
-    m.add_function(wrap_pyfunction!(estimate, m)?)
+fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let modsym = PyModule::new(m.py(), "modsym")?;
+    modsym.add_function(wrap_pyfunction!(hecke_charpoly, &modsym)?)?;
+    modsym.add_function(wrap_pyfunction!(charpoly_exact, &modsym)?)?;
+    modsym.add_function(wrap_pyfunction!(batch_exact, &modsym)?)?;
+    modsym.add_function(wrap_pyfunction!(level_data, &modsym)?)?;
+    modsym.add_function(wrap_pyfunction!(commute, &modsym)?)?;
+    modsym.add_function(wrap_pyfunction!(estimate, &modsym)?)?;
+    m.add_submodule(&modsym)
 }

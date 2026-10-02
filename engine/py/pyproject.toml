@@ -3,6 +3,11 @@ requires = ["maturin>=1.7"]
 build-backend = "maturin"
 
 [project]
-name = "modsym-engine"
+name = "sagebrush"
 version = "0.1.0"
+description = "Fast, certified, parallel engines for research mathematics (early experiment)"
 requires-python = ">=3.9"
+
+[tool.maturin]
+module-name = "sagebrush._native"
+python-source = "python"

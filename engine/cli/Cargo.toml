@@ -1,12 +1,12 @@
 [package]
-name = "modsym-cli"
+name = "sagebrush-cli"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "modsym-engine"
+name = "sagebrush"
 path = "src/main.rs"
 
 [dependencies]
-modsym-core = { path = "../core" }
+sagebrush-modsym = { path = "../modsym" }
 rayon = "1.10"

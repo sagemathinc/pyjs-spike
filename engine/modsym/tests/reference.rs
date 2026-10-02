@@ -1,7 +1,7 @@
 //! Mod-p characteristic polynomial hashes printed by the pure-Python
 //! reference implementation, bench/modsym/modsym.py (p = 67108859).
 
-use modsym_core::hecke_charpoly;
+use sagebrush_modsym::hecke_charpoly;
 
 #[test]
 fn hashes_match_the_python_reference() {

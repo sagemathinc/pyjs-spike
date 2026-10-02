@@ -2,9 +2,9 @@
 //! the quotient actually computed, for every level up to 1000 and some
 //! larger, highly composite ones.
 
-use modsym_core::exact::level_data;
-use modsym_core::presentation::Presentation;
-use modsym_core::space::Space;
+use sagebrush_modsym::exact::level_data;
+use sagebrush_modsym::presentation::Presentation;
+use sagebrush_modsym::space::Space;
 
 #[test]
 fn formula_matches_computed_dimension() {

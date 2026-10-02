@@ -2,6 +2,6 @@
 # Builds the native addon into this directory: require("./engine/node").
 set -e
 cd "$(dirname "$0")"
-cargo build --release -p modsym-node
-cp ../target/release/libmodsym_engine_node.so modsym_engine.node
-echo "built $(pwd)/modsym_engine.node"
+cargo build --release -p sagebrush-node
+cp ../target/release/libsagebrush_node.so sagebrush.node
+echo "built $(pwd)/sagebrush.node"

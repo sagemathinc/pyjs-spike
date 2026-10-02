@@ -1,4 +1,6 @@
-//! modsym-engine N q [p] [--threads T] [--exact] [--commute r] [--level]
+//! sagebrush <engine> ...   (engines: modsym)
+//!
+//! sagebrush modsym N q [p] [--threads T] [--exact] [--commute r] [--level]
 //!
 //! Default: characteristic polynomial of T_q mod p (prints a hash).
 //! --exact: the characteristic polynomial over Z, with its status.
@@ -27,8 +29,18 @@ fn fail(e: &str) -> ! {
     std::process::exit(2)
 }
 
+const USAGE: &str = "usage: sagebrush modsym N q [p] [--threads T] [--exact] [--commute r] [--level]";
+
 fn main() {
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("modsym") => modsym(args[1..].to_vec()),
+        _ => fail(USAGE),
+    }
+}
+
+/// Weight-2 modular symbols for Gamma0(N), sign +1.
+fn modsym(mut args: Vec<String>) {
     let threads: usize = take_value(&mut args, "--threads").map_or(0, |s| s.parse().unwrap());
     let commute: Option<u64> = take_value(&mut args, "--commute").map(|s| s.parse().unwrap());
     let exact = take_flag(&mut args, "--exact");
@@ -39,17 +51,17 @@ fn main() {
     let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
     let t = std::time::Instant::now();
     if level {
-        let (psi, g, c, e, d) = modsym_core::exact::level_data(n);
+        let (psi, g, c, e, d) = sagebrush_modsym::exact::level_data(n);
         println!("N={} psi={} genus={} cusps={} eisenstein+={} dim={}", n, psi, g, c, e, d);
         return;
     }
     if let Some(r) = commute {
-        let ok = pool.install(|| modsym_core::hecke_commute(n, q, r, p)).unwrap_or_else(|e| fail(&e));
+        let ok = pool.install(|| sagebrush_modsym::hecke_commute(n, q, r, p)).unwrap_or_else(|e| fail(&e));
         println!("N={} T_{} T_{} commute mod {}: {} ({:.0} ms)", n, q, r, p, ok, t.elapsed().as_secs_f64() * 1000.0);
         return;
     }
     if exact {
-        match pool.install(|| modsym_core::exact::exact_charpoly(n, q)) {
+        match pool.install(|| sagebrush_modsym::exact::exact_charpoly(n, q)) {
             Err(e) => fail(&e),
             Ok(e) => {
                 let shown: Vec<String> = e.coeffs.iter().map(|c| c.to_string()).collect();
@@ -67,7 +79,7 @@ fn main() {
         }
         return;
     }
-    let r = pool.install(|| modsym_core::hecke_charpoly(n, q, p)).unwrap_or_else(|e| fail(&e));
+    let r = pool.install(|| sagebrush_modsym::hecke_charpoly(n, q, p)).unwrap_or_else(|e| fail(&e));
     println!(
         "N={} q={} p={} symbols={} gens={} dim={} eisenstein_root={} charpoly_hash={}",
         r.n, r.q, r.p, r.symbols, r.gens, r.dim, if r.eisenstein_root() { "True" } else { "False" }, r.hash()

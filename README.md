@@ -28,10 +28,10 @@ The same functions are available from:
 
 | interface | built with | notes |
 |---|---|---|
-| Python (`import modsym_engine`) | PyO3 | releases the GIL; exact coefficients are Python `int`s |
-| Node.js (`require("./engine/node")`) | napi-rs | native addon; exact coefficients are `BigInt`s |
-| Rust (`modsym-core`) | - | the engine itself |
-| command line (`modsym-engine`) | - | `modsym-engine N q [p] [--exact] [--threads T]` |
+| Python (`from sagebrush import modsym`) | PyO3 | releases the GIL; exact coefficients are Python `int`s |
+| Node.js (`require("./engine/node").modsym`) | napi-rs | native addon; exact coefficients are `BigInt`s |
+| Rust (`sagebrush-modsym`) | - | the engine itself |
+| command line (`sagebrush`) | - | `sagebrush modsym N q [p] [--exact] [--threads T]` |
 | WebAssembly | wasm-bindgen | single-threaded; mod-p only for now |
 
 Every interface is multithreaded except WASM: `threads=0` means all cores.
@@ -45,8 +45,8 @@ cd engine
 uv venv .venv && uv pip install --python .venv/bin/python maturin ipython
 (cd py && ../.venv/bin/maturin develop --release)   # Python module
 node/build.sh                                       # Node addon
-./try-python                                        # IPython, module bound to m
-./try-node                                          # Node REPL, module bound to m
+./try-python                                        # IPython, m = sagebrush.modsym
+./try-node                                          # Node REPL, m = sagebrush.modsym
 ```
 
 ```python
@@ -78,7 +78,7 @@ fits within the bound.
 
 ## Tests
 
-`cd engine && cargo test -p modsym-core` runs in about 5 seconds after the first build. It checks:
+`cd engine && cargo test -p sagebrush-modsym` runs in about 5 seconds after the first build. It checks:
 
 - exact characteristic polynomials against 24 Sage computations, levels 1
   to 2003, including prime powers and non-squarefree levels;
@@ -107,7 +107,7 @@ caveats: [results/engine-exact.md](results/engine-exact.md) and
 
 | path | contents |
 |---|---|
-| `engine/` | the Rust workspace: `core`, `cli`, `py`, `node`, `wasm`, `bench` |
+| `engine/` | the Rust workspace: `modsym` (the engine), `cli`, `py`, `node`, `wasm`, `bench` |
 | `results/` | write-ups of every experiment, with numbers |
 | `bench/modsym/` | the pure-Python reference implementation and a line-by-line Rust port |
 | `src/`, `lib/`, `test/`, `target/`, `scripts/`, `PLAN.md` | the original pyjs experiment (below) |

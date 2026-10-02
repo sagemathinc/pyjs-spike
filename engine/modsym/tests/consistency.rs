@@ -2,9 +2,9 @@
 //! theory: Hecke operators commute, the mod-p charpoly is the exact one
 //! reduced mod p, and the estimator predicts the computed dimension.
 
-use modsym_core::estimate::estimate;
-use modsym_core::exact::exact_charpoly;
-use modsym_core::{hecke_charpoly, hecke_commute};
+use sagebrush_modsym::estimate::estimate;
+use sagebrush_modsym::exact::exact_charpoly;
+use sagebrush_modsym::{hecke_charpoly, hecke_commute};
 use num_bigint::BigInt;
 
 fn small_prime_not_dividing(n: u64) -> u64 {

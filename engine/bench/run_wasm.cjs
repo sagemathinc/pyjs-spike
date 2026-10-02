@@ -1,5 +1,5 @@
-// modsym-engine from Node via WebAssembly: node run_wasm.cjs N q
-const { hecke_charpoly } = require("../wasm/pkg/modsym_wasm.js");
+// sagebrush.modsym from Node via WebAssembly: node run_wasm.cjs N q
+const { hecke_charpoly } = require("../wasm/pkg/sagebrush_wasm.js");
 const [n, q] = process.argv.slice(2).map(Number);
 const t = performance.now();
 const r = JSON.parse(hecke_charpoly(n, q, 67108859));

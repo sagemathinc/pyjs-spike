@@ -7,6 +7,6 @@ fn main() {
     let mut rnd = || { x ^= x << 13; x ^= x >> 7; x ^= x << 17; x % p };
     let h: Vec<Vec<u64>> = (0..n).map(|_| (0..n).map(|_| rnd()).collect()).collect();
     let t = std::time::Instant::now();
-    let f = modsym_core::linalg::charpoly(h, p);
+    let f = sagebrush_modsym::linalg::charpoly(h, p);
     println!("n={} charpoly {:.3}s f[0]={}", n, t.elapsed().as_secs_f64(), f[0]);
 }

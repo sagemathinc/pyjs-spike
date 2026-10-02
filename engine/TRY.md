@@ -1,21 +1,23 @@
-# Trying modsym-engine interactively
+# Trying Sagebrush interactively
 
-Two local, unpublished modules built from the same Rust core
-(`engine/core`): a CPython extension (PyO3) and a Node.js native addon
-(napi-rs).  Both are multithreaded (`threads=0` means all cores), and
-exact coefficients are arbitrary-precision (Python `int`, JS `BigInt`).
+Sagebrush builds local, unpublished modules from the same Rust engines: a
+CPython package (PyO3) and a Node.js native addon (napi-rs). Both are
+multithreaded (`threads=0` means all cores), and exact coefficients have
+arbitrary precision (Python `int`, JS `BigInt`). Each engine is a
+submodule; today there is one, `modsym`.
 
 ## Start a REPL
 
-    ~/pyjs-spike/engine/try-python     # IPython, module bound to m
-    ~/pyjs-spike/engine/try-node       # Node REPL, module bound to m
+    ~/sagebrush/engine/try-python     # IPython: sagebrush, and m = sagebrush.modsym
+    ~/sagebrush/engine/try-node       # Node REPL: the same
 
 Or import it yourself:
 
-    ~/pyjs-spike/engine/.venv/bin/python -c "import modsym_engine as m; print(m.charpoly_exact(37, 2))"
-    node -e 'const m = require(process.env.HOME + "/pyjs-spike/engine/node"); console.log(m.charpolyExact(37, 2))'
+    ~/sagebrush/engine/.venv/bin/python -c "from sagebrush import modsym; print(modsym.charpoly_exact(37, 2))"
+    node -e 'const { modsym } = require(process.env.HOME + "/sagebrush/engine/node"); console.log(modsym.charpolyExact(37, 2))'
+    ~/sagebrush/engine/target/release/sagebrush modsym 37 2 --exact
 
-## Functions (Python name / JS name)
+## `sagebrush.modsym` (Python name / JS name)
 
 | Python | JS | returns |
 |---|---|---|
@@ -26,7 +28,7 @@ Or import it yourself:
 | `estimate(N, q)` | `estimate(N, q)` | predicted dim, primes, bytes, one-thread seconds |
 | `commute(N, q, r, p=..., threads=0)` | `commute(N, q, r, p?, threads?)` | T_q T_r == T_r T_q mod p |
 
-Space: weight 2, Gamma0(N), sign +1 modular symbols.  q must be a prime
+Space: weight 2, Gamma0(N), sign +1 modular symbols. q must be a prime
 not dividing N (otherwise ValueError / a thrown Error).
 
 ## Things to try
@@ -42,8 +44,14 @@ not dividing N (otherwise ValueError / a thrown Error).
 The calls are synchronous: in Node a big one blocks the REPL until it is
 done, and in Python the GIL is released (other threads keep running).
 
-## Rebuilding after changing the Rust code
+## Building (once) and rebuilding after changing Rust code
 
-    cd ~/pyjs-spike/engine
-    (cd py && ../.venv/bin/maturin develop --release)   # Python
-    node/build.sh                                       # Node
+    cd ~/sagebrush/engine
+    uv venv .venv && uv pip install --python .venv/bin/python maturin ipython
+    (cd py && ../.venv/bin/maturin develop --release)   # Python package
+    node/build.sh                                       # Node addon
+    cargo build --release -p sagebrush-cli              # sagebrush command
+    cargo test -p sagebrush-modsym                      # tests, ~5 s
+
+`bench/explore_exact.py` also needs `pyarrow` and `python-flint` in the
+venv.

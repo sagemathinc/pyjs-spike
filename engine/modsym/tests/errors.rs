@@ -1,8 +1,8 @@
 //! Invalid input is an error (never a panic), level 1 is the zero space,
 //! and a batch keeps going past bad levels.
 
-use modsym_core::exact::{batch_exact, exact_charpoly};
-use modsym_core::{hecke_charpoly, hecke_commute, validate};
+use sagebrush_modsym::exact::{batch_exact, exact_charpoly};
+use sagebrush_modsym::{hecke_charpoly, hecke_commute, validate};
 use num_bigint::BigInt;
 
 const P: u64 = 67108859;
