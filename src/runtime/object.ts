@@ -908,3 +908,64 @@ export function checkArity(f: any, name: string, self: boolean, range?: [number,
   for (const k of Object.keys(f)) w[k] = f[k];
   return w;
 }
+
+// A Map-like view over an object's own properties, so a PyDict can be a
+// live view of a module namespace (globals()).
+export class ObjMap {
+  constructor(public o: any) {}
+  get size(): number {
+    return this.keys().length;
+  }
+  keys(): string[] {
+    return Object.keys(this.o).filter((k) => k[0] !== "$" && this.o[k] !== undefined);
+  }
+  get(k: any): any {
+    return typeof k === "string" && Object.prototype.hasOwnProperty.call(this.o, k) ? this.o[k] : undefined;
+  }
+  has(k: any): boolean {
+    return this.get(k) !== undefined;
+  }
+  set(k: any, v: any): this {
+    if (typeof k !== "string") raise(T.TypeError, "module namespace keys must be strings");
+    this.o[k] = v;
+    return this;
+  }
+  delete(k: any): boolean {
+    if (!this.has(k)) return false;
+    delete this.o[k];
+    return true;
+  }
+  clear() {
+    for (const k of this.keys()) delete this.o[k];
+  }
+  values(): any[] {
+    return this.keys().map((k) => this.o[k]);
+  }
+  entries(): any[][] {
+    return this.keys().map((k) => [k, this.o[k]]);
+  }
+  [Symbol.iterator]() {
+    return this.entries()[Symbol.iterator]();
+  }
+}
+export function globalsDict(g: any): PyDict {
+  if (g.$globalsDict === undefined) {
+    const d = new PyDict();
+    (d as any).$m = new ObjMap(g);
+    Object.defineProperty(g, "$globalsDict", { value: d, enumerable: false });
+  }
+  return g.$globalsDict;
+}
+// The namespace object behind a globals dict, or a proxy over a plain dict
+// (exec/eval with an explicit globals mapping).
+export function namespaceOf(d: any): any {
+  if (d instanceof PyDict && (d.$m as any) instanceof ObjMap) return ((d.$m as any) as ObjMap).o;
+  return new Proxy(Object.create(null), {
+    get: (_t, k) => (typeof k === "string" ? dictGet(d, k) : undefined),
+    set: (_t, k, v) => (typeof k === "string" && dictSet(d, k, v), true),
+    has: (_t, k) => typeof k === "string" && dictGet(d, k) !== undefined,
+    deleteProperty: (_t, k) => (typeof k === "string" && dictDelete(d, k), true),
+    ownKeys: () => [...d.$m.keys()].filter((k: any) => typeof k === "string"),
+    getOwnPropertyDescriptor: (_t, k) => (typeof k === "string" && dictGet(d, k) !== undefined ? { value: dictGet(d, k), writable: true, enumerable: true, configurable: true } : undefined),
+  });
+}

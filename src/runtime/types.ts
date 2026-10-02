@@ -754,6 +754,21 @@ method(S, "rpartition", (s: string, sep: string) => {
 method(S, "removeprefix", (s: string, p: string) => (s.startsWith(p) ? s.slice(p.length) : s));
 method(S, "removesuffix", (s: string, p: string) => (p && s.endsWith(p) ? s.slice(0, -p.length) : s));
 method(S, "encode", (s: string, encoding: any = "utf-8", errors: any = "strict") => encode(s, encoding, errors), sig(["self", "encoding", "errors"]));
+method(S, "expandtabs", (s: string, ts: any = 8) => {
+  let out = "", col = 0;
+  const n = Number(ts);
+  for (const c of s) {
+    if (c === "\t") {
+      const k = n > 0 ? n - (col % n) : 0;
+      out += " ".repeat(k);
+      col += k;
+    } else {
+      out += c;
+      col = c === "\n" || c === "\r" ? 0 : col + 1;
+    }
+  }
+  return out;
+});
 method(S, "format", (s: string, ...args: any[]) => strFormat(s, args, new Map()));
 S.$dict.get("format").$kw = (pos: any[], names: string[], values: any[]) => strFormat(pos[0], pos.slice(1), new Map(names.map((n, i) => [n, values[i]])));
 method(S, "format_map", (s: string, m: any) => strFormat(s, [], m));
@@ -1478,3 +1493,60 @@ getset(object, "__dict__", (o) => {
   for (const k of Object.keys(o)) if (k[0] !== "$" && !(Array.isArray(o) && /^\d+$/.test(k))) dictSet(d, k, o[k]);
   return d;
 });
+
+// bytes/bytearray methods that mirror str methods run the str version on a
+// latin-1 view and convert results back to the receiver's type.
+{
+  const latin = (x: any): any => {
+    if (x instanceof PyBytes) return decode(x, "latin1");
+    if (Array.isArray(x)) return (x as any).$t ? tuple(x.map(latin)) : x.map(latin);
+    return x;
+  };
+  const back = (x: any, Cls: any): any => {
+    if (typeof x === "string") return new Cls(encode(x, "latin1").a);
+    if (Array.isArray(x)) return (x as any).$t ? tuple(x.map((v) => back(v, Cls))) : x.map((v) => back(v, Cls));
+    return x;
+  };
+  const names = ["split", "rsplit", "strip", "lstrip", "rstrip", "partition", "rpartition", "replace", "index", "rindex", "find", "rfind", "count", "startswith", "endswith", "upper", "lower", "splitlines", "center", "ljust", "rjust", "zfill", "isdigit", "isalpha", "isspace", "isalnum", "isupper", "islower", "title", "capitalize", "swapcase", "removeprefix", "removesuffix", "expandtabs", "join"];
+  for (const [bt, Cls] of [[T.bytes, PyBytes], [T.bytearray, PyByteArray]] as const) {
+    for (const name of names) {
+      const f = S.$dict.get(name);
+      if (f === undefined) throw new Error(`internal: str.${name} missing`);
+      const intArg = ["index", "rindex", "find", "rfind", "count"].includes(name);
+      const m = function (self: PyBytes, ...args: any[]) {
+        if (name === "join") return back(f(latin(self), O.toArray(args[0]).map((v) => {
+          if (!(v instanceof PyBytes)) raise(T.TypeError, `sequence item: expected a bytes-like object, ${typeName(v)} found`);
+          return latin(v);
+        })), Cls);
+        const conv = args.map((a, i) => (intArg && i === 0 && O.isPyInt(a) ? String.fromCharCode(Number(a)) : a === undefined ? a : latin(a)));
+        for (const a of conv) if (typeof a === "string" && false) void a;
+        return back(f(latin(self), ...conv), Cls);
+      };
+      method(bt, name, m, f.$sig ?? null);
+    }
+  }
+  const fromhex = (cls: any, s: string) => {
+    const clean = s.replace(/\s+/g, "");
+    if (!/^([0-9a-fA-F]{2})*$/.test(clean)) raise(T.ValueError, "non-hexadecimal number found in fromhex() arg");
+    const a = Uint8Array.from(clean.match(/../g) ?? [], (h) => parseInt(h, 16));
+    return cls === T.bytearray ? new PyByteArray(a) : new PyBytes(a);
+  };
+  T.bytes.$dict.set("fromhex", new PyClassMethod(pyfn(fromhex, "fromhex")));
+  T.bytearray.$dict.set("fromhex", new PyClassMethod(pyfn(fromhex, "fromhex")));
+  T.int.$dict.set("from_bytes", new PyClassMethod(pyfn((_c: any, b: any, byteorder: any = "big", signed: any = false) => {
+    const a = O.toArray(b).map(Number);
+    if (byteorder === "little") a.reverse();
+    let v = 0n;
+    for (const d of a) v = (v << 8n) | BigInt(d);
+    if (O.truth(signed) && a.length && a[0] >= 128) v -= 1n << BigInt(8 * a.length);
+    return O.normBig(v);
+  }, "from_bytes", sig(["cls", "bytes", "byteorder"], { kwonly: ["signed"] }))));
+  method(T.OSError, "__init__", (self: any, ...args: any[]) => {
+    self.args = tuple(args);
+    self.errno = args.length >= 2 ? args[0] : null;
+    self.strerror = args.length >= 2 ? args[1] : null;
+    self.filename = args.length >= 3 ? args[2] : null;
+    return null;
+  });
+  method(T.OSError, "__str__", (self: any) => (self.errno !== null && self.errno !== undefined ? `[Errno ${str(self.errno)}] ${str(self.strerror)}${self.filename !== null && self.filename !== undefined ? `: ${repr(self.filename)}` : ""}` : T.BaseException.$dict.get("__str__")(self)));
+}

@@ -8,8 +8,12 @@ import { builtins, stdout, stderr } from "./builtins";
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
 
-// Set by the driver: find and execute a Python source module, or return null.
-export const loader: { load: (name: string) => any | null } = { load: () => null };
+// Set by the driver: find and execute a Python source module, or return
+// null; compile and run source text for exec/eval/compile.
+export const loader: { load: (name: string) => any | null; exec: (src: string, g: any, mode: string, filename: string) => any } = {
+  load: () => null,
+  exec: () => null,
+};
 
 export function newBuiltinModule(name: string, fill: (m: any) => void) {
   factories[name] = fill;
@@ -77,7 +81,7 @@ export function importFrom(m: any, name: string): any {
 // `from m import *`
 export function importStar(m: any, g: any) {
   const all = m.__all__;
-  const names = all !== undefined ? O.toArray(all) : Object.keys(m).filter((k) => !k.startsWith("_"));
+  const names = all !== undefined ? O.toArray(all) : Object.keys(m).filter((k) => !k.startsWith("_") && !k.startsWith("$"));
   for (const k of names) g[k] = getattr(m, k);
 }
 

@@ -296,6 +296,8 @@ export class Emitter {
       const cls = this.classCell();
       if (cls !== null && this.fn.firstParam !== null) return `superOf(${cls}, ${this.fn.firstParam})`;
     }
+    const intro = this.introspectionCall(e);
+    if (intro !== null) return intro;
     const consumed = this.consumingCall(e);
     if (consumed !== null) return consumed;
     const simple = !e.args.some((a) => a.k === "Starred") && e.keywords.length === 0;
@@ -328,6 +330,34 @@ export class Emitter {
     }
     if (maps.length === 0) return `callKw(${callee}, ${pos}, [${names.join(", ")}], [${values.join(", ")}])`;
     return `callEx(${callee}, ${pos}, [${names.join(", ")}], [${values.join(", ")}], [${maps.join(", ")}])`;
+  }
+
+  // globals(), locals(), vars(), dir(), eval() and exec() need the caller's
+  // namespaces, which only the compiler knows.
+  introspectionCall(e: Extract<A.Expr, { k: "Call" }>): string | null {
+    const f = e.func;
+    if (f.k !== "Name" || e.keywords.length !== 0 || e.args.some((a) => a.k === "Starred")) return null;
+    const names = ["globals", "locals", "vars", "dir", "eval", "exec"];
+    const r = resolve(this.fn.scope, f.id);
+    const isGlobal = r.kind === "global" || (r.kind === "class" && r.outer.kind === "global" && !this.fn.scope.bound.has(f.id));
+    if (!names.includes(f.id) || !isGlobal || this.moduleBinds(f.id)) return null;
+    const n = e.args.length;
+    if ((f.id === "vars" || f.id === "dir") && n !== 0) return null;
+    if (f.id === "globals" && n === 0) return "R.globalsDict($g)";
+    const scope = this.fn.scope;
+    const localsExpr = (): string => {
+      if (scope.kind === "module") return "R.globalsDict($g)";
+      if (scope.kind === "class") return "R.localsDict([...$ns.keys()], [...$ns.values()])";
+      const ls = [...scope.bound].filter((x) => !scope.globals.has(x));
+      return `R.localsDict(${JSON.stringify(ls)}, [${ls.map((x) => (resolve(scope, x).kind === "global" ? "undefined" : js(x))).join(", ")}])`;
+    };
+    if (f.id === "locals" || f.id === "vars") return n === 0 ? localsExpr() : null;
+    if (f.id === "dir") return `sortedKeys(${localsExpr()})`;
+    if (n < 1 || n > 3) return null;
+    const args = e.args.map((a) => this.ex(a));
+    const callerLocals = n === 1 && scope.kind !== "module" ? localsExpr() : "null";
+    const fn = f.id === "eval" ? "R.evalIn" : "R.execIn";
+    return `${fn}(${args[0]}, ${args[1] ?? "undefined"}, ${args[2] ?? "undefined"}, $g, ${callerLocals})`;
   }
 
   // `tuple(x for ...)`, `sum(...)`, `any(...)` etc. on the builtin: run the
@@ -799,12 +829,13 @@ export class Emitter {
     this.w(`${b} = ${bases};`);
     const { lines, decls } = this.nested(scope, "", null, [], () => {
       const body = st.body;
+      this.w(`$ns.set("__module__", $g.__name__); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
       if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") this.w(`$ns.set("__doc__", ${q(body[0].value.value.v)});`);
       for (const s of body) this.stmt(s);
     });
     this.line = st.line;
     const c = this.temp();
-    this.w(`${c} = (() => {`);
+    this.w(`${c} = (function ${js(st.name)}$() {`);
     this.indent++;
     this.w(`const $ns = new Map(); let __class__$;`);
     if (decls.length) this.w(`let ${decls.join(", ")};`);
@@ -897,9 +928,13 @@ export class Emitter {
 
   // ------------------------------------------------------------ module
 
-  module(body: A.Stmt[]): Compiled {
+  module(body: A.Stmt[], evalMode = false): Compiled {
     this.fn = new Fn(this.top, null, "module$$", null);
-    for (const s of body) this.stmt(s);
+    if (evalMode) {
+      if (body.length !== 1 || body[0].k !== "Expr") this.fail("invalid syntax", body[0]?.line ?? 1);
+      this.line = body[0].line;
+      this.w(`return ${this.ex((body[0] as Extract<A.Stmt, { k: "Expr" }>).value)};`);
+    } else for (const s of body) this.stmt(s);
     const head = [
       "(function module$$($g, R) {",
       '"use strict";',
@@ -936,4 +971,5 @@ const RUNTIME_NAMES = [
   "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom",
   "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "classDef",
   "importModule", "importTop", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
+  "sortedKeys",
 ];

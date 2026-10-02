@@ -10,10 +10,10 @@ import { R } from "./runtime/index";
 
 const builtinNames = new Set(Object.keys(R.builtins));
 
-export function compile(source: string, filename: string, moduleName: string): Compiled {
+export function compile(source: string, filename: string, moduleName: string, evalMode = false): Compiled {
   const mod = parse(source, filename);
   try {
-    return new Emitter(analyze(mod), builtinNames, moduleName).module(mod.body);
+    return new Emitter(analyze(mod), builtinNames, moduleName).module(mod.body, evalMode);
   } catch (e) {
     if (e instanceof SyntaxErr) throw new PySyntaxError(e.msg, filename, e.line, mod.lines[e.line - 1] ?? "");
     throw e;
@@ -54,6 +54,23 @@ export function execModule(source: string, filename: string, name: string, isPac
   }
   return m;
 }
+
+// exec/eval/compile: compile `src` and run it with `ns` as its globals.
+let execCounter = 0;
+R.loader.exec = (src: string, ns: any, mode: string, filename: string) => {
+  const evalMode = mode === "eval" || mode === "check-eval";
+  let compiled: Compiled;
+  try {
+    compiled = compile(src, filename, "__main__", evalMode);
+  } catch (e) {
+    if (e instanceof PySyntaxError) throw syntaxError(e);
+    throw e;
+  }
+  if (mode === "check" || mode === "check-eval") return null;
+  const jsName = `py:<exec ${++execCounter}>`;
+  R.scripts.set(jsName, { filename, lines: src.split("\n"), lineMap: compiled.lineMap });
+  return runInThisContext(compiled.code, { filename: jsName })(ns, R);
+};
 
 // Import search: directories in sys.path, `name.py` or `name/__init__.py`.
 R.loader.load = (name: string) => {

@@ -124,6 +124,85 @@ export function reraise(): any {
   return Obj.newException(T.RuntimeError, ["No active exception to reraise"]);
 }
 
+// ------------------------------------------------------------------ globals, locals, exec, eval
+
+export function sortedKeys(d: Obj.PyDict): string[] {
+  return O.toArray(d).sort();
+}
+
+export function localsDict(names: string[], values: any[]): Obj.PyDict {
+  const d = new Obj.PyDict();
+  names.forEach((n, i) => {
+    if (values[i] !== undefined) Obj.dictSet(d, n, values[i]);
+  });
+  return d;
+}
+
+// The namespace exec/eval code runs in: explicit globals (and locals), or
+// the caller's module plus, inside a function, a snapshot of its locals.
+function execNamespace(globals: any, locals: any, g: any, callerLocals: any): any {
+  if (globals !== undefined && globals !== null) {
+    if (!(globals instanceof Obj.PyDict)) raise(T.TypeError, `globals must be a dict, not ${typeName(globals)}`);
+    if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", B.builtins);
+    const ns = Obj.namespaceOf(globals);
+    return locals !== undefined && locals !== null && locals !== globals ? layered(Obj.namespaceOf(locals), ns) : ns;
+  }
+  if (g === null || g === undefined) g = Obj.dictGet(M.sysModules, "__main__") ?? Ty.newModule("__main__");
+  if (callerLocals !== null && callerLocals !== undefined) return layered(Obj.namespaceOf(callerLocals), g);
+  return g;
+}
+// Reads see `front` then `back`; writes go to `front`.
+function layered(front: any, back: any): any {
+  return new Proxy(Object.create(null), {
+    get: (_t, k) => (k in front && front[k] !== undefined ? front[k] : back[k]),
+    set: (_t, k, v) => ((front[k] = v), true),
+    has: (_t, k) => k in front || k in back,
+    deleteProperty: (_t, k) => (delete front[k], true),
+    ownKeys: () => [...new Set([...Reflect.ownKeys(front), ...Reflect.ownKeys(back)])],
+    getOwnPropertyDescriptor: (_t, k) => {
+      const v = k in front && front[k] !== undefined ? front[k] : back[k];
+      return v === undefined ? undefined : { value: v, writable: true, enumerable: true, configurable: true };
+    },
+  });
+}
+
+export class CodeObject {
+  constructor(public src: string, public filename: string, public mode: string) {}
+}
+const codeType = Ty.builtinTypeFor("code", CodeObject, "builtins", () => raise(T.TypeError, "cannot create 'code' objects"));
+Ty.getset(codeType, "co_filename", (c) => c.filename);
+Ty.getset(codeType, "co_name", () => "<module>");
+
+function sourceOf(src: any, fn: string): [string, string] {
+  if (src instanceof CodeObject) return [src.src, src.filename];
+  if (src instanceof Obj.PyBytes) return [Ty.decode(src), "<string>"];
+  if (typeof src !== "string") raise(T.TypeError, `${fn}() arg 1 must be a string, bytes or code object`);
+  return [src, "<string>"];
+}
+
+export function execIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
+  const [text, filename] = sourceOf(src, "exec");
+  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals), "exec", filename);
+  return null;
+}
+export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
+  if (src instanceof CodeObject && src.mode === "exec") return execIn(src, globals, locals, g, callerLocals);
+  const [text, filename] = sourceOf(src, "eval");
+  return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals), "eval", filename);
+}
+function compileBuiltin(src: any, filename: any, mode: any): CodeObject {
+  const [text] = sourceOf(src, "compile");
+  if (mode !== "exec" && mode !== "eval" && mode !== "single") raise(T.ValueError, "compile() mode must be 'exec', 'eval' or 'single'");
+  M.loader.exec(text, null, mode === "eval" ? "check-eval" : "check", String(filename));
+  return new CodeObject(text, String(filename), mode);
+}
+Obj.builtin(compileBuiltin, "compile");
+B.builtins.compile = compileBuiltin;
+B.builtins.exec = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => execIn(src, gl ?? null, lo, null, null), "exec");
+B.builtins.eval = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => evalIn(src, gl ?? null, lo, null, null), "eval");
+B.builtins.globals = Obj.builtin(() => raise(T.RuntimeError, "globals() called indirectly is not supported"), "globals");
+B.builtins.locals = Obj.builtin(() => raise(T.RuntimeError, "locals() called indirectly is not supported"), "locals");
+
 // ------------------------------------------------------------------ classes
 
 export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any>, kwNames: string[], kwValues: any[]): any {
@@ -244,6 +323,11 @@ export const R: any = {
   makeRange: Ty.makeRange,
   PyRange: Ty.PyRange,
   defn,
+  globalsDict: Obj.globalsDict,
+  localsDict,
+  sortedKeys,
+  execIn,
+  evalIn,
   callEx,
   dictOf,
   yieldFrom,
