@@ -16,6 +16,7 @@
 
 mod par;
 pub mod estimate;
+pub mod cusps;
 pub mod exact;
 pub mod linalg;
 pub mod newforms;

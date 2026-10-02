@@ -1,8 +1,35 @@
-# Galois orbits of newforms (prime level): first milestone
+# Galois orbits of newforms of weight 2
 
 `engine/modsym/src/orbits.rs` decomposes the weight-2 newforms on
-$\Gamma_0(N)$ into Galois orbits and computes $\operatorname{tr}(a_p)$ and
-the coordinates $c_p$ of $a_p$ for each orbit, at prime level $N$ for now.
+$\Gamma_0(N)$, for every level $N$, into Galois orbits, and computes
+$\operatorname{tr}(a_p)$ and the coordinates $c_p$ of $a_p$ for each orbit.
+
+## Composite levels (second milestone)
+
+| check | result |
+|---|---|
+| **every level $1\le N\le 1000$ vs LMFDB** `mf_newforms` | **5,951 Galois orbits (largest dimension 55): dimensions and $\operatorname{Tr}(a_p)$ for all primes $p<1000$, $p\nmid N$, identical at every level.** 101.8 s on 16 threads, 94 MB |
+| `cargo test`: every level $\le 200$ vs Sage | 470 orbits identical (Sage took 33 s on one core to produce them) |
+| cusp classes from Cremona's criterion, $N\le 400$ | the formula $\sum_{d\mid N}\varphi(\gcd(d,N/d))$, and with $x\sim -x$ the Eisenstein dimension $+1$, at every level |
+
+How composite levels work. Take $T=\sum_i r_iT_{q_i}$ and factor
+$\chi(T)\in\mathbb{Z}[x]$. A new orbit occurs once in the sign $+1$
+space, while an old orbit from level $M\mid N$ occurs $d(N/M)\ge 2$
+times. The Eisenstein factors are exactly those dividing $\chi_E$, the
+charpoly of $T$ on the boundary image $\delta(M)$ (cusp classes via
+Cremona's criterion, computed mod $\ell$). So the new orbits are the
+non-Eisenstein irreducible factors of exponent one, with no recursion over
+lower levels. The coefficients are super-increasing: $r_1=1$ and
+$r_{i+1}=1+\sum_{j\le i}r_j\lceil 4\sqrt{q_j}\rceil$. Then
+$\sum_i r_i(a_{q_i}-b_{q_i})=0$ forces $a_{q_i}=b_{q_i}$, since
+$|a_q-b_q|\le 4\sqrt q$. With small coefficients, rational forms
+collided often (at $N=200$ and $214$). The degrees must add up to
+$\dim S_2^{\rm new}(N)=\sum_{M\mid N}\beta(N/M)\,g(M)$, and otherwise
+more primes are tried. One bug on the way: the "random" vectors for the
+Krylov basis were affine in the seed, so all seeds spanned only two fixed
+vectors, and an eigen-functional orthogonal to both defeated every seed.
+
+## Prime levels (first milestone)
 
 ## Method
 
@@ -34,10 +61,7 @@ was still running after 4 minutes on one core, at level 739.
 
 ## Next
 
-1. Composite levels: the new subspace. Old orbits from level $M\mid N$
-   appear $d(N/M)$ times, so a factor whose multiplicity exceeds 1 is
-   separated or attributed using the lower levels, as for rational newforms.
-   The cuspidal projection can use the Eisenstein eigenvalue bound for $q\ge 7$.
+1. ~~Composite levels~~ (done, above).
 2. Integral $c_p\in\mathbb{Z}^k$: an integral basis of $A^\vee$ (rational
    reconstruction from several $\ell$, or an integral presentation à la
    PARI's well-formed fundamental domain, implemented from the mathematics

@@ -27,3 +27,41 @@ fn prime_level_orbits_match_sage_up_to_300() {
     }
     assert_eq!(count, include_str!("fixtures/sage_prime_orbits_le300.jsonl").lines().count());
 }
+
+/// Every level N <= 200, composite ones included (oldforms, Eisenstein
+/// series with characters): orbit dimensions and tr(T_p | A) for primes
+/// p <= 100 not dividing N, against Sage (fixtures/sage_orbits_le200.jsonl,
+/// from `sage fixtures/make_sage_orbits.sage 1 200 OUT`).
+#[test]
+fn newform_orbits_match_sage_up_to_200() {
+    let mut sage: HashMap<u64, Vec<(usize, Vec<(u64, i64)>)>> = HashMap::new();
+    for line in include_str!("fixtures/sage_orbits_le200.jsonl").lines() {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        let mut tr: Vec<(u64, i64)> = v["traces"].as_object().unwrap().iter().map(|(p, t)| (p.parse().unwrap(), t.as_i64().unwrap())).collect();
+        tr.sort();
+        sage.entry(v["level"].as_u64().unwrap()).or_default().push((v["dim"].as_u64().unwrap() as usize, tr));
+    }
+    let factor = |f: &[num_bigint::BigInt]| sagebrush_flint::factor(f).1;
+    let mut count = 0;
+    for n in 1..=200u64 {
+        let orbits = sagebrush_modsym::orbits::newform_orbits(n, 100, &factor).unwrap();
+        let mut ours: Vec<(usize, Vec<(u64, i64)>)> = orbits.into_iter().map(|o| (o.dim, o.traces)).collect();
+        let mut theirs = sage.remove(&n).unwrap_or_default();
+        ours.sort();
+        theirs.sort();
+        assert_eq!(ours, theirs, "N={}", n);
+        count += ours.len();
+    }
+    assert_eq!(count, include_str!("fixtures/sage_orbits_le200.jsonl").lines().count());
+}
+
+#[test]
+fn new_dimension_formula() {
+    use sagebrush_modsym::orbits::new_dimension;
+    // dim S_2^new: 11 -> 1, 22 -> 0 (old only), 23 -> 2, 37 -> 2, 389 -> 32, 960 -> 16 + non-rational
+    assert_eq!(new_dimension(11), 1);
+    assert_eq!(new_dimension(22), 0);
+    assert_eq!(new_dimension(23), 2);
+    assert_eq!(new_dimension(37), 2);
+    assert_eq!(new_dimension(389), 32);
+}

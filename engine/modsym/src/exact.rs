@@ -345,3 +345,81 @@ mod tests {
         }
     }
 }
+
+/// The characteristic polynomial over Z (constant term first) of the
+/// combination T = sum r_i T_{q_i}, for primes q_i not dividing N.  Same
+/// method as `exact_charpoly`: CRT over primes with the dimension check,
+/// and a proven bound: cusp eigenvalues are real with |l| <= B_c =
+/// sum |r_i| 2 sqrt(q_i), Eisenstein ones |l| <= B_e = sum |r_i| (1 + q_i);
+/// the sum of squares p2 from the first prime gives sum_cusp l^2 <=
+/// p2 + e B_e^2, and then Jensen as before.
+pub fn exact_charpoly_combo(n: u64, ops: &[(u64, i64)]) -> Result<Vec<BigInt>, String> {
+    for &(q, _) in ops {
+        crate::validate(n, q, None)?;
+    }
+    let (_, genus, _, eis, dim) = level_data(n);
+    let bc: f64 = ops.iter().map(|&(q, r)| r.unsigned_abs() as f64 * 2.0 * (q as f64).sqrt()).sum();
+    let be: f64 = ops.iter().map(|&(q, r)| r.unsigned_abs() as f64 * (1.0 + q as f64)).sum();
+    let mut need = genus as f64 * (1.0 + bc).log2() + eis as f64 * (1.0 + be).log2() + 2.0;
+    let mut refined = false;
+    let pres = Presentation::new(n);
+    let mut residues: Vec<(u64, Vec<u64>)> = vec![];
+    let (mut bits, mut rejected) = (0.0, 0);
+    let mut next = 1u64 << 31;
+    while bits < need {
+        let want = (((need - bits) / 30.99).ceil() as usize).clamp(1, 8);
+        let mut batch = vec![];
+        while batch.len() < want {
+            next -= 1;
+            if is_prime(next) {
+                batch.push(next);
+            }
+        }
+        let results = par::map_slice(&batch, |&p| {
+            let sp = Space::new(&pres, p);
+            if sp.dimension() as u64 != dim {
+                return (p, None);
+            }
+            let mut t = vec![vec![0u64; dim as usize]; dim as usize];
+            for &(q, r) in ops {
+                let rq = r.rem_euclid(p as i64) as u64;
+                for (row, hrow) in t.iter_mut().zip(sp.hecke_matrix(&pres, q)) {
+                    for (x, h) in row.iter_mut().zip(hrow) {
+                        *x = ((*x as u128 + rq as u128 * h as u128) % p as u128) as u64;
+                    }
+                }
+            }
+            (p, Some(linalg::charpoly(t, p)))
+        });
+        for (p, r) in results {
+            match r {
+                Some(f) => {
+                    if !refined && dim >= 2 && (p as f64) > 4.0 * dim as f64 * be.max(bc) * be.max(bc) {
+                        let d = dim as usize;
+                        let (c1, c2) = (f[d - 1] as u128, f[d - 2] as u128);
+                        let v = ((c1 * c1 + 2 * (p as u128 - c2)) % p as u128) as i128;
+                        let p2 = if v > p as i128 / 2 { v - p as i128 } else { v } as f64;
+                        let cusp_sq = (p2 + eis as f64 * be * be).max(0.0);
+                        let r = if genus == 0 { 0.0 } else { (cusp_sq / genus as f64).sqrt() };
+                        need = need.min(genus as f64 * (1.0 + r).log2() + eis as f64 * (1.0 + be).log2() + 2.0);
+                        refined = true;
+                    }
+                    if bits < need {
+                        bits += (p as f64).log2();
+                        residues.push((p, f));
+                    }
+                }
+                None => rejected += 1,
+            }
+        }
+        if rejected > 16 {
+            return Err(format!("too many primes with the wrong dimension (expected {})", dim));
+        }
+    }
+    let coeffs = crt(&residues, dim as usize);
+    let max_bits = coeffs.iter().map(|c| c.abs().bits()).max().unwrap_or(0) as f64;
+    if !coeffs.last().map_or(true, |c| c.is_one()) || max_bits >= need {
+        return Err(format!("N = {}: inconsistent multimodular charpoly ({} bits, bound {:.0})", n, max_bits, need));
+    }
+    Ok(coeffs)
+}

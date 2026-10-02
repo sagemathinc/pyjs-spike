@@ -9,7 +9,7 @@ pub fn gcd(mut a: u64, mut b: u64) -> u64 {
     a
 }
 
-fn xgcd(a: i64, b: i64) -> (i64, i64) {
+pub fn xgcd(a: i64, b: i64) -> (i64, i64) {
     // returns (g, s) with s*a == g (mod b)
     let (mut r0, mut r1, mut s0, mut s1) = (a, b, 1i64, 0i64);
     while r1 != 0 {
