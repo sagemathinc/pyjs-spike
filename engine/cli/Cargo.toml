@@ -1,0 +1,12 @@
+[package]
+name = "modsym-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "modsym-engine"
+path = "src/main.rs"
+
+[dependencies]
+modsym-core = { path = "../core" }
+rayon = "1.10"

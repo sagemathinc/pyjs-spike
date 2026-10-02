@@ -1,0 +1,11 @@
+[package]
+name = "modsym-core"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["parallel"]
+parallel = ["dep:rayon"]
+
+[dependencies]
+rayon = { version = "1.10", optional = true }

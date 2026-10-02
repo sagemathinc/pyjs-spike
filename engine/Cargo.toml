@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["core", "cli", "py", "wasm"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
