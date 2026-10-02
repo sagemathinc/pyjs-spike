@@ -1,0 +1,18 @@
+[package]
+name = "modsym-node"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "modsym_engine_node"
+crate-type = ["cdylib"]
+
+[dependencies]
+modsym-core = { path = "../core" }
+rayon = "1.10"
+num-bigint = "0.4"
+napi = { version = "2", default-features = false, features = ["napi6"] }
+napi-derive = "2"
+
+[build-dependencies]
+napi-build = "2"

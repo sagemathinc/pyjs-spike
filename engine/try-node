@@ -1,0 +1,4 @@
+#!/bin/sh
+# Node REPL with the engine preloaded as `m` (build: see TRY.md).
+cd "$(dirname "$0")"
+exec node -i -e 'globalThis.m = require("./node"); console.log("modsym_engine loaded as m:", Object.keys(m).join(", "))'
