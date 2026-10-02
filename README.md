@@ -1,10 +1,132 @@
-# pyjs-spike
+# Sagebrush
 
-A two-week experiment to decide whether Python semantics compiled to
-JavaScript can be competitive with CPython. Read [PLAN.md](PLAN.md).
+Fast, certified, parallel engines for research mathematics, written in Rust
+and usable from Python and JavaScript.
+
+Sagebrush is an early experiment from the founder of SageMath. The idea:
+mathematicians, and the AI agents working with them, should be able to ask
+large questions (thousands of levels, millions of objects) and get results
+in seconds. Every result should come with a status saying whether it is
+*proven* or only heuristic. The design is many small, strong engines that
+share one core, not one huge system.
+
+Status: one engine (modular symbols), not published to any package
+registry, and no license chosen yet.
+
+## What works today
+
+Weight-2 modular symbols for Gamma0(N), sign +1:
+
+- characteristic polynomials of Hecke operators T_q modulo a prime;
+- **proven** characteristic polynomials over Z, by multimodular CRT with a
+  proven coefficient bound (see below), each returned with the checks it passed;
+- batches of levels in parallel, with a bad level reported and the batch continuing;
+- estimates of dimension, primes, memory and time before running anything;
+- level data (index, genus, cusps, Eisenstein and total dimension).
+
+The same functions are available from:
+
+| interface | built with | notes |
+|---|---|---|
+| Python (`import modsym_engine`) | PyO3 | releases the GIL; exact coefficients are Python `int`s |
+| Node.js (`require("./engine/node")`) | napi-rs | native addon; exact coefficients are `BigInt`s |
+| Rust (`modsym-core`) | - | the engine itself |
+| command line (`modsym-engine`) | - | `modsym-engine N q [p] [--exact] [--threads T]` |
+| WebAssembly | wasm-bindgen | single-threaded; mod-p only for now |
+
+Every interface is multithreaded except WASM: `threads=0` means all cores.
+
+## Try it
+
+You need Rust (stable), `uv` and Node.js.
 
 ```sh
-python3 bench/bench.py      # CPython baseline
-node target/bench.js        # hand-written ideal compiler output
-node --test target/         # semantics checks for the runtime fast paths
+cd engine
+uv venv .venv && uv pip install --python .venv/bin/python maturin ipython
+(cd py && ../.venv/bin/maturin develop --release)   # Python module
+node/build.sh                                       # Node addon
+./try-python                                        # IPython, module bound to m
+./try-node                                          # Node REPL, module bound to m
 ```
+
+```python
+>>> m.charpoly_exact(37, 2)["charpoly"]       # x^3 - x^2 - 6x = x (x - 3)(x + 2)
+[0, -6, -1, 1]
+>>> r = m.batch_exact(range(11, 500, 2), 2)   # 245 proven charpolys, ~0.02 s
+>>> m.estimate(20011, 2)                      # what would a big one cost?
+```
+
+See [engine/TRY.md](engine/TRY.md) for the full function list in both
+languages.
+
+## How "proven" is earned
+
+Exact characteristic polynomials are reconstructed by CRT from computations
+modulo primes below 2^31. Each prime is accepted only if the space it
+produces has exactly the dimension that the genus and cusp formulas
+predict. The number of primes comes from a proven bound on the
+coefficients:
+
+- cusp eigenvalues are real with |a| <= 2 sqrt(q) (Deligne);
+- Eisenstein eigenvalues are chi(q) + psi(q) q, so |a| <= 1 + q;
+- the bound is then sharpened using the exact sum of squares of the
+  eigenvalues, read off the first prime, and Jensen's inequality. This
+  needs 24-25% fewer primes than Deligne alone.
+
+A result is marked `proven` only if it is monic, has q + 1 as a root, and
+fits within the bound.
+
+## Tests
+
+`cd engine && cargo test -p modsym-core` takes about 5 seconds. It checks:
+
+- exact characteristic polynomials against 24 Sage computations, levels 1
+  to 2003, including prime powers and non-squarefree levels;
+- the dimension formula against the computed dimension for every N <= 1000
+  and four large composite levels;
+- mod-p hashes against the independent pure-Python implementation
+  (`bench/modsym/modsym.py`);
+- error handling: invalid input is an error, never a panic;
+- consistency between the code paths: Hecke operators commute, the mod-p
+  result equals the exact result reduced mod p, and the estimator predicts
+  the dimension;
+- the charpoly kernel against determinants, the AVX2 kernels against the
+  portable ones, and P^1(Z/NZ) by brute force.
+
+## Performance
+
+On one thread, on the same machine, the engine computes proven exact
+charpolys 3.9-7.8x faster than Sage's default path and 1.1-4.7x faster than
+Sage's fastest (LinBox, heuristic) path, for dimensions 592-835. It also
+parallelizes: exact T_2 for all 1495 odd levels below 3000 takes 18 seconds
+on 8 cores. Details, including what did not work and the benchmarking
+caveats: [results/engine-exact.md](results/engine-exact.md) and
+[results/engine.md](results/engine.md).
+
+## Repository layout
+
+| path | contents |
+|---|---|
+| `engine/` | the Rust workspace: `core`, `cli`, `py`, `node`, `wasm`, `bench` |
+| `results/` | write-ups of every experiment, with numbers |
+| `bench/modsym/` | the pure-Python reference implementation and a line-by-line Rust port |
+| `src/`, `lib/`, `test/`, `target/`, `scripts/`, `PLAN.md` | the original pyjs experiment (below) |
+
+## History: from pyjs-spike to Sagebrush
+
+This repository began as **pyjs-spike**, a two-week experiment to see
+whether Python semantics compiled to JavaScript could compete with CPython,
+as a foundation for sagejs ([PLAN.md](PLAN.md),
+[results/pyperformance-bench1.md](results/pyperformance-bench1.md)). The
+compiler worked, but a modular-symbols benchmark changed the plan. The same
+algorithm ran 31x slower in CPython, 18x slower in pyjs and 2.4x slower in
+PyPy than in a direct Rust port ([results/rust.md](results/rust.md)).
+
+So the mathematics moved into Rust, behind thin bindings for the ecosystems
+people actually use (Python and JavaScript), and the work went into making
+results fast, parallel and certified. The pyjs code remains here for
+reference.
+
+## License
+
+Not chosen yet.
