@@ -11,6 +11,11 @@ fn main() {
     let q: u64 = args.get(1).map_or(2, |s| s.parse().unwrap());
     let p: u64 = args.get(2).map_or(67108859, |s| s.parse().unwrap());
     let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+    if std::env::var("MODSYM_DEBUG").is_ok() {
+        let ms = modsym_core::ModularSymbols::new(n, p);
+        let t = ms.hecke_matrix(q);
+        eprintln!("T_{} = {:?}", q, t.iter().map(|r| r.iter().map(|&x| if x > p / 2 { x as i64 - p as i64 } else { x as i64 }).collect::<Vec<_>>()).collect::<Vec<_>>());
+    }
     let r = pool.install(|| modsym_core::hecke_charpoly(n, q, p));
     println!(
         "N={} q={} p={} symbols={} dim={} eisenstein_root={} charpoly_hash={}",
