@@ -7,6 +7,11 @@ import * as F from "./format";
 import * as Ty from "./types";
 import * as B from "./builtins";
 import * as M from "./modules";
+import * as Arr from "./array";
+
+O.arrayHooks.cls = Arr.PyArray;
+O.arrayHooks.get = Arr.arrayGetitem;
+O.arrayHooks.set = Arr.arraySetitem;
 
 const { T, raise, tuple, bindArgs, typeName } = Obj;
 
@@ -88,7 +93,10 @@ export function dictOf(...kv: any[]): Obj.PyDict {
 // `yield from x`: a JS iterable delegating to x.
 export function yieldFrom(x: any): any {
   if (x !== null && typeof x === "object" && x[Symbol.toStringTag] === "Generator") return x;
+  if (Array.isArray(x) && (x as any).$cls === undefined) return x;
   const it = O.iter(x);
+  // A Python generator behind __iter__: delegate to it natively.
+  if (it instanceof O.GenIter) return it.g;
   return {
     [Symbol.iterator]() {
       return {

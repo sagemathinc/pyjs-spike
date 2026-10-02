@@ -180,15 +180,19 @@ function roundImpl(x: any, nd: any = null): any {
 function isinstanceImpl(x: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => isinstanceImpl(x, s));
   if (!isType(spec)) raise(T.TypeError, "isinstance() arg 2 must be a type, a tuple of types, or a union");
-  const ic = lookupType(typeOf(spec), "__instancecheck__");
-  if (ic !== undefined && typeOf(spec) !== T.type) return O.truth(ic(spec, x));
-  return isinstance(x, spec) || subclassHook(spec, typeOf(x));
+  const t = typeOf(x);
+  if (t === spec || t.$mro.includes(spec) || spec === T.object) return true;
+  return subclassHook(spec, t);
 }
-// ABC-style structural checks: a class's __subclasshook__ classmethod.
-function subclassHook(spec: PyType, c: PyType): boolean {
-  const hook = lookupType(spec, "__subclasshook__");
-  if (hook instanceof Ty.PyClassMethod) return hook.f(spec, c) === true;
-  return false;
+// ABC-style structural checks: a class's __subclasshook__ classmethod,
+// looked up once per class version.
+function subclassHook(spec: any, c: PyType): boolean {
+  if (spec.$hookVer !== spec.$ver) {
+    spec.$hookVer = spec.$ver;
+    const h = spec.$ctor === null ? undefined : lookupType(spec, "__subclasshook__");
+    spec.$hook = h instanceof Ty.PyClassMethod ? h : null;
+  }
+  return spec.$hook !== null && spec.$hook.f(spec, c) === true;
 }
 function issubclassImpl(c: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => issubclassImpl(c, s));

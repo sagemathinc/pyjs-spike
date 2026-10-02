@@ -288,6 +288,8 @@ export class Emitter {
       const cls = this.classCell();
       if (cls !== null && this.fn.firstParam !== null) return `superOf(${cls}, ${this.fn.firstParam})`;
     }
+    const consumed = this.consumingCall(e);
+    if (consumed !== null) return consumed;
     const simple = !e.args.some((a) => a.k === "Starred") && e.keywords.length === 0;
     if (simple) {
       if (f.k === "Attribute") {
@@ -320,6 +322,23 @@ export class Emitter {
     return `callEx(${callee}, ${pos}, [${names.join(", ")}], [${values.join(", ")}], [${maps.join(", ")}])`;
   }
 
+  // `tuple(x for ...)`, `sum(...)`, `any(...)` etc. on the builtin: run the
+  // generator expression as an eager loop (they consume it entirely or stop
+  // at the first decisive item), guarded on the name still being the builtin.
+  consumingCall(e: Extract<A.Expr, { k: "Call" }>): string | null {
+    const f = e.func;
+    if (f.k !== "Name" || e.args.length !== 1 || e.keywords.length !== 0 || e.args[0].k !== "Comp" || e.args[0].kind !== "gen") return null;
+    const kinds: Record<string, string> = { tuple: "tuple", list: "list", set: "set", frozenset: "frozenset", sum: "sum", any: "any", all: "all", sorted: "list", min: "list", max: "list" };
+    const kind = kinds[f.id];
+    if (kind === undefined || resolve(this.fn.scope, f.id).kind !== "global" || this.moduleBinds(f.id)) return null;
+    const comp = e.args[0];
+    const fn = this.temp();
+    const fast = this.comprehension(comp, kind);
+    const slow = this.comprehension(comp);
+    const wrap: Record<string, string> = { tuple: `tuple(${fast})`, list: fast, set: fast, frozenset: `R.newSet(${fast}, true)`, sum: fast, any: fast, all: fast, sorted: `${fn}(${fast})`, min: `${fn}(${fast})`, max: `${fn}(${fast})` };
+    return `((${fn} = ${this.load(f.id)}) === $B${prop(f.id)} ? ${wrap[f.id]} : callObj(${fn}, [${slow}]))`;
+  }
+
   // JS variable holding the class being defined, for zero-argument super().
   classCell(): string | null {
     for (let s: Scope | null = this.fn.scope; s !== null; s = s.parent) if (s.kind === "class") return "__class__$";
@@ -328,7 +347,7 @@ export class Emitter {
 
   // ------------------------------------------------------------ comprehensions
 
-  comprehension(e: Extract<A.Expr, { k: "Comp" }>): string {
+  comprehension(e: Extract<A.Expr, { k: "Comp" }>, eager: string | null = null): string {
     const scope = this.fn.scope.child(e);
     const first = `iter(${this.ex(e.generators[0].iter)})`;
     const saved = this.fn;
@@ -350,12 +369,26 @@ export class Emitter {
     });
     // The element is compiled after the targets, so the comprehension
     // variables count as assigned.
-    if (e.kind === "gen") body = `yield ${this.ex(e.elt)};`;
+    if (eager === "tuple" || eager === "list" || eager === "frozenset") body = `${r}.push(${this.ex(e.elt)});`;
+    else if (eager === "set") body = `setAdd(${r}, ${this.ex(e.elt)});`;
+    else if (eager === "sum") body = `${r} = add(${r}, ${this.ex(e.elt)});`;
+    else if (eager === "any") body = `if (${this.bool(e.elt)}) return true;`;
+    else if (eager === "all") body = `if (!${this.bool(e.elt)}) return false;`;
+    else if (e.kind === "gen") body = `yield ${this.ex(e.elt)};`;
     else if (e.kind === "list") body = `${r}.push(${this.ex(e.elt)});`;
     else if (e.kind === "set") body = `setAdd(${r}, ${this.ex(e.elt)});`;
     else body = `dictSet(${r}, ${this.ex(e.elt)}, ${this.ex(e.value!)});`;
     const locals = [...scope.bound].map(js);
     const decls = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
+    if (eager !== null) {
+      const init: Record<string, string> = { tuple: "[]", list: "[]", set: "newSet()", frozenset: "[]", sum: "0", any: "", all: "" };
+      const fin: Record<string, string> = { tuple: `return ${r};`, list: `return ${r};`, set: `return ${r};`, frozenset: `return ${r};`, sum: `return ${r};`, any: "return false;", all: "return true;" };
+      const start = init[eager] ? `let ${r} = ${init[eager]}; ` : "";
+      const decls2 = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
+      const inner2 = `${decls2.length ? `let ${decls2.join(", ")}; ` : ""}${start}${loops.join(" ")} ${body} ${closes.reverse().join(" ")} ${fin[eager]}`;
+      this.fn = saved;
+      return `(function genexpr$$($it0) { ${inner2} })(${first})`;
+    }
     const inner = `${decls.length ? `let ${decls.join(", ")}; ` : ""}${e.kind === "gen" ? "" : `const ${r} = ${e.kind === "list" ? "[]" : e.kind === "set" ? "newSet()" : "newDict()"}; `}${loops.join(" ")} ${body} ${closes.reverse().join(" ")}${e.kind === "gen" ? "" : ` return ${r};`}`;
     this.fn = saved;
     if (e.kind === "gen") return `(function* genexpr$$($it0) { ${inner} })(${first})`;

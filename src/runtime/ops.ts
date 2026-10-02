@@ -57,9 +57,21 @@ export function bigToFloat(x: bigint): number {
   return r;
 }
 
+// Dunder lookup with a per-class cache, invalidated by the class version.
 function special(o: any, name: string): any {
-  return lookupType(typeOf(o), name);
+  const t: any = typeOf(o);
+  let c = t.$dc;
+  if (c === undefined || t.$dcVer !== t.$ver) {
+    c = t.$dc = Object.create(null);
+    t.$dcVer = t.$ver;
+  }
+  const v = c[name];
+  if (v !== undefined) return v === MISSING ? undefined : v;
+  const f = lookupType(t, name);
+  c[name] = f === undefined ? MISSING : f;
+  return f;
 }
+const MISSING = {};
 
 const OPS: Record<string, [string, string, string]> = {
   add: ["__add__", "__radd__", "+"],
@@ -258,8 +270,9 @@ function floordivSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) {
     const x = big(a), y = big(b);
     if (y === 0n) raise(T.ZeroDivisionError, "integer division or modulo by zero");
+    // One BigInt division; flooring only matters when the signs differ.
     let q = x / y;
-    if (x % y !== 0n && x < 0n !== y < 0n) q -= 1n;
+    if (x < 0n !== y < 0n && q * y !== x) q -= 1n;
     return normBig(q);
   }
   const x = fv(a), y = fv(b);
@@ -707,14 +720,13 @@ function truthSlow(x: any): boolean {
   if (x instanceof PyDict && (x.$cls === T.dict || layoutPlain(x.$cls))) return x.$m.size !== 0;
   if (x instanceof PyBytes) return x.n !== 0;
   if (typeof x === "function") return true;
-  const t = typeOf(x);
-  let f = lookupType(t, "__bool__");
+  let f = special(x, "__bool__");
   if (f !== undefined) {
     const r = f(x);
     if (typeof r !== "boolean") raise(T.TypeError, `__bool__ should return bool, returned ${typeName(r)}`);
     return r;
   }
-  f = lookupType(t, "__len__");
+  f = special(x, "__len__");
   if (f !== undefined) return truth(f(x));
   return true;
 }
@@ -1209,7 +1221,18 @@ export function dictGetitem(o: PyDict, k: any): any {
   if (v !== undefined) return v;
   return dictMissing(o, k);
 }
+export const arrayHooks: { cls: any; get: any; set: any } = { cls: null, get: null, set: null };
+
 function getitemSlow(o: any, k: any): any {
+  if (o !== null && typeof o === "object") {
+    const c = o.$cls;
+    // Instances of Python classes: straight to the (cached) __getitem__.
+    if (c !== undefined && c.$ctor !== null && c.$jsBase === null) {
+      const f = special(o, "__getitem__");
+      if (f !== undefined) return f(o, k);
+    }
+  }
+  if (arrayHooks.cls !== null && o instanceof arrayHooks.cls) return arrayHooks.get(o, k);
   if (Array.isArray(o) || o instanceof PyDict) {
     const f = special(o, "__getitem__");
     return f(o, k);
@@ -1284,6 +1307,16 @@ export function arrSet(o: any[], k: any, v: any): void {
 }
 
 export function setitem(o: any, k: any, v: any): void {
+  if (o !== null && typeof o === "object" && !Array.isArray(o)) {
+    const c = o.$cls;
+    if (c !== undefined && c.$ctor !== null && c.$jsBase === null) {
+      const f = special(o, "__setitem__");
+      if (f !== undefined) {
+        f(o, k, v);
+        return;
+      }
+    }
+  }
   if (Array.isArray(o) && (o as any).$t !== true && (o as any).$cls === undefined) {
     if (typeof k === "number" && k >= 0 && k < o.length && isInt(k)) {
       o[k] = v;
@@ -1297,6 +1330,7 @@ export function setitem(o: any, k: any, v: any): void {
     dictSet(o, k, v);
     return;
   }
+  if (arrayHooks.cls !== null && o instanceof arrayHooks.cls) return arrayHooks.set(o, k, v);
   if (o instanceof PyByteArray) {
     if (k instanceof PySlice) return bytearraySetSlice(o, k, v);
     o.a[seqIndex(k, o.n, "bytearray")] = byteValue(v);
