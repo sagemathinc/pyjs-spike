@@ -141,10 +141,40 @@ pub fn bound_bits(q: u64, genus: u64, eis: u64) -> f64 {
     genus as f64 * (1.0 + 2.0 * qf.sqrt()).log2() + eis as f64 * (2.0 + qf).log2() + 2.0
 }
 
+/// A sharper proven bound from the sum of squares of all eigenvalues,
+/// p2 = e1^2 - 2 e2 (read off a charpoly mod p).  Cusp eigenvalues are real,
+/// so by Jensen (log(1 + sqrt x) is concave) prod (1 + |l|) <= (1 + r)^g with
+/// r^2 = (sum over cusp eigenvalues of l^2) / g.  Eisenstein eigenvalues
+/// chi(q) + psi(q) q have |l| <= 1 + q; for squarefree N they all equal q + 1.
+pub fn bound_bits_from_squares(n: u64, q: u64, genus: u64, eis: u64, p2: i128) -> f64 {
+    let qf = q as f64;
+    let squarefree = factor(n).iter().all(|&(_, e)| e == 1);
+    let eis_sq = eis as f64 * (1.0 + qf) * (1.0 + qf);
+    let cusp_sq = if squarefree { p2 as f64 - eis_sq } else { p2 as f64 + eis_sq };
+    let r = if genus == 0 { 0.0 } else { (cusp_sq.max(0.0) / genus as f64).sqrt() };
+    genus as f64 * (1.0 + r).log2() + eis as f64 * (2.0 + qf).log2() + 2.0
+}
+
+/// The exact sum of squares of the eigenvalues from a charpoly mod p, if p
+/// is large enough for the symmetric residue to be the integer.
+fn sum_of_squares(f: &[u64], p: u64, dim: u64, q: u64) -> Option<i128> {
+    let d = dim as usize;
+    if d < 2 || 2 * dim as u128 * (1 + q as u128).pow(2) >= p as u128 {
+        return None;
+    }
+    let (c1, c2) = (f[d - 1] as u128, f[d - 2] as u128);
+    let v = ((c1 * c1 + 2 * (p as u128 - c2)) % p as u128) as i128;
+    Some(if v > p as i128 / 2 { v - p as i128 } else { v })
+}
+
 pub fn exact_charpoly(n: u64, q: u64) -> Result<Exact, String> {
     crate::validate(n, q, None)?;
     let (_, genus, cusps, eis, dim) = level_data(n);
-    let need = bound_bits(q, genus, eis);
+    let worst = bound_bits(q, genus, eis);
+    let mut need = worst;
+    let mut refined: Option<i128> = None;
+    // Batch sizing only: the Sato-Tate guess r = sqrt(q).
+    let guess = genus as f64 * (1.0 + (q as f64).sqrt()).log2() + eis as f64 * (2.0 + q as f64).log2() + 2.0;
     let pres = Presentation::new(n);
     let (mut used, mut rejected) = (vec![], vec![]);
     let mut residues: Vec<(u64, Vec<u64>)> = vec![];
@@ -153,7 +183,8 @@ pub fn exact_charpoly(n: u64, q: u64) -> Result<Exact, String> {
     while bits < need {
         // A batch of primes, computed in parallel: no more than are still
         // needed (each prime adds 30.99 bits), and at most 8 for memory.
-        let want = (((need - bits) / 30.99).ceil() as usize).clamp(1, 8);
+        let target = if refined.is_some() { need } else { guess.min(need) };
+        let want = (((target - bits) / 30.99).ceil() as usize).clamp(1, 8);
         let mut batch = vec![];
         while batch.len() < want {
             next -= 1;
@@ -161,14 +192,14 @@ pub fn exact_charpoly(n: u64, q: u64) -> Result<Exact, String> {
                 batch.push(next);
             }
         }
-        let results = par::map_slice(&batch, |&p| {
-            let sp = Space::new(&pres, p);
-            if sp.dimension() as u64 != dim {
-                return (p, None);
-            }
-            (p, Some(linalg::charpoly(sp.hecke_matrix(&pres, q), p)))
-        });
+        let results = charpolys_mod(&pres, q, dim, &batch);
         for (p, r) in results {
+            if let (None, Some(f)) = (refined, &r) {
+                if let Some(p2) = sum_of_squares(f, p, dim, q) {
+                    refined = Some(p2);
+                    need = need.min(bound_bits_from_squares(n, q, genus, eis, p2));
+                }
+            }
             match r {
                 Some(f) if bits < need => {
                     bits += (p as f64).log2();
@@ -193,8 +224,25 @@ pub fn exact_charpoly(n: u64, q: u64) -> Result<Exact, String> {
     checks.push(format!("q + 1 is a root (an Eisenstein eigenvalue): {}", eis_ok));
     let max_bits = coeffs.iter().map(|c| c.abs().bits()).max().unwrap_or(0);
     checks.push(format!("largest coefficient has {} bits, bound {:.0}", max_bits, need));
+    if let Some(p2) = refined {
+        checks.push(format!("bound from the sum of squares of the eigenvalues {} (worst case {:.0} bits)", p2, worst));
+    }
     let status = if monic && eis_ok && (max_bits as f64) < need { "proven" } else { "inconsistent" };
     Ok(Exact { n, q, genus, cusps, eis, dim, coeffs, primes_used: used, primes_rejected: rejected, bound_bits: need, status, checks })
+}
+
+/// Charpolys of T_q modulo each prime of a batch (None where the dimension
+/// is wrong), the primes in parallel.  Measured against building the Hecke
+/// matrices one prime at a time and running 8 primes through one
+/// interleaved SIMD kernel: that halves memory but was 1.5x slower.
+fn charpolys_mod(pres: &Presentation, q: u64, dim: u64, batch: &[u64]) -> Vec<(u64, Option<Vec<u64>>)> {
+    par::map_slice(batch, |&p| {
+        let sp = Space::new(pres, p);
+        if sp.dimension() as u64 != dim {
+            return (p, None);
+        }
+        (p, Some(linalg::charpoly(sp.hecke_matrix(pres, q), p)))
+    })
 }
 
 /// Chinese remaindering to symmetric representatives.

@@ -13,7 +13,8 @@ pub struct Estimate {
     pub genus: u64,
     /// Primes needed for the exact characteristic polynomial.
     pub primes: u64,
-    /// Peak bytes for one prime, and for the exact computation.
+    /// Peak bytes for one prime, and for the exact computation (up to 8
+    /// primes are in flight at once).
     pub bytes_modp: f64,
     pub bytes_exact: f64,
     /// Single-thread seconds for one prime, and for the exact computation.
@@ -21,19 +22,23 @@ pub struct Estimate {
     pub seconds_exact: f64,
 }
 
-// Fitted constants (seconds per unit of work, free generators per symbol).
-const GENS_PER_SYMBOL: f64 = 0.5;
-const ELIM: f64 = 2e-9;
-const HECKE: f64 = 2e-9;
-const CHARPOLY: f64 = 2e-9;
+// Fitted on one thread for dim 84..3334: free generators are psi/4; the
+// elimination constant is an upper bound (highly composite levels have the
+// most fill-in, prime levels are ~5x cheaper); the charpoly constant grows
+// once the matrix leaves the cache.
+const GENS_PER_SYMBOL: f64 = 0.25;
+const ELIM: f64 = 4e-8;
+const HECKE: f64 = 3e-9;
+const CHARPOLY: f64 = 4.4e-10;
 
 pub fn estimate(n: u64, q: u64) -> Estimate {
     let (psi, genus, _, eis, dim) = level_data(n);
     let (m, d) = (GENS_PER_SYMBOL * psi as f64, dim as f64);
     let h = heilbronn(q as i64).len() as f64;
     let primes = (bound_bits(q, genus, eis) / 30.99).ceil();
-    let bytes_modp = 8.0 * (m * d + 2.0 * d * d) + 64.0 * psi as f64;
-    let seconds_modp = ELIM * m * d + HECKE * h * d * d + CHARPOLY * d * d * d;
+    // Dense coordinates of every free generator dominate, then the matrix.
+    let bytes_modp = 8.0 * m * d + 4.0 * d * d + 3e6;
+    let seconds_modp = ELIM * m * d + HECKE * h * d * d + CHARPOLY * (1.0 + d / 4000.0) * d * d * d;
     Estimate {
         n,
         q,

@@ -56,6 +56,9 @@ fn main() {
                 let poly = if shown.len() <= 12 { shown.join(", ") } else { format!("{}, ..., {}", shown[..4].join(", "), shown[shown.len() - 4..].join(", ")) };
                 println!("N={} q={} genus={} cusps={} dim={} status={}", e.n, e.q, e.genus, e.cusps, e.dim, e.status);
                 println!("charpoly (constant term first): [{}]", poly);
+                // FNV-1a of the comma-joined decimal coefficients, to compare runs.
+                let h = shown.join(",").bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+                println!("coefficients digest {:016x}", h);
                 println!("primes used {} (rejected {:?}), bound {:.0} bits; {:.0} ms on {} threads", e.primes_used.len(), e.primes_rejected, e.bound_bits, t.elapsed().as_secs_f64() * 1000.0, pool.current_num_threads());
                 for c in &e.checks {
                     println!("  check: {}", c);
