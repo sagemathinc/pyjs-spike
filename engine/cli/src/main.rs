@@ -34,8 +34,8 @@ fn main() {
     let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
     let t = std::time::Instant::now();
     if level {
-        let (psi, g, c, d) = modsym_core::exact::level_data(n);
-        println!("N={} psi={} genus={} cusps={} dim={}", n, psi, g, c, d);
+        let (psi, g, c, e, d) = modsym_core::exact::level_data(n);
+        println!("N={} psi={} genus={} cusps={} eisenstein+={} dim={}", n, psi, g, c, e, d);
         return;
     }
     if let Some(r) = commute {
