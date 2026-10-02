@@ -88,6 +88,40 @@ What it does **not** show:
   `str` code-point semantics, dicts with tuple keys, or `globals()`;
 * code size, compile latency, or startup.
 
+## Status (day 1 of the two-week compiler)
+
+The compiler exists and runs the pyperformance subset.  `src/` has the
+tree-sitter frontend, scope analysis, emitter and runtime (about 9k lines of
+TypeScript); `lib/` has stdlib modules written in Python and compiled by
+pyjs.  Measured on the 16-CPU development host against CPython 3.14.4
+(`results/pyperformance-3.md`; one cold call, ~1 s warmup, median of five):
+
+* **Warm: geometric mean 1.01x CPython over 21 benchmarks.** 13 are faster
+  than CPython (spectral_norm 0.42, scimark_fft 0.64, float 0.73, deltablue
+  0.78, hexiom 0.82, nbody 0.90, ...).  Every benchmark is within 2x except
+  pidigits (2.05x, V8 BigInt division).
+* **Cold (first call): misses 2x on short benchmarks**: deltablue 9.0x (3 ms
+  of work), unpack_sequence 6.2x, hexiom 4.7x, richards_super 2.4x,
+  meteor_contest 2.3x, sparse_mat_mult 2.3x, pidigits 2.2x.  On these the
+  first call is dominated by V8 tier-up and first-execution cache misses.
+  End to end the scripts are still competitive (deltablue: 190 ms total vs
+  CPython's 276 ms), but process startup is 81 ms vs 24 ms.
+* **Correctness:** every benchmark's output matches CPython; the
+  MicroPython corpus passes 338 of 511.  Most remaining failures are library
+  breadth (array/memoryview/struct/io/collections variants, exec/eval,
+  async), not the language core.
+
+What made the difference, in order of impact: the representation and
+caches from step 0; a TypeScript `array` with typed storage; per-class
+caches (dunders, construction, `==` reducing to identity, class-receiver
+call sites) keyed on class version; native delegation for `yield from`;
+eager loops for generator expressions consumed by builtins; and
+statement-scoped temporaries.
+
+Known gaps: set iteration order differs from CPython's hash-table order;
+`str` uses UTF-16 indexing; no `exec`/`eval`, `async`, or metaclasses; int,
+str and float cannot be subclassed yet; `__dict__` is a snapshot.
+
 ## Design validated by step 0
 
 **Value representation.**

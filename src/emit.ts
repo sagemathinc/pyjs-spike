@@ -25,7 +25,9 @@ interface Line {
 
 // One compiled JS function: module body, def, lambda, class body, comprehension.
 class Fn {
-  temps: string[] = [];
+  temps: string[] = []; // every temporary declared in this JS function
+  free: string[] = []; // temporaries available for reuse
+  inUse: string[] = [];
   assigned = new Set<string>();
   buf: Line[] = [];
   loops: { label: string | null }[] = [];
@@ -61,9 +63,15 @@ export class Emitter {
   w(text: string) {
     this.fn.buf.push({ text: "  ".repeat(this.indent) + text, py: this.line });
   }
+  // Temporaries live until the end of the statement that allocated them
+  // (compound statements: until the end of their body), then are reused.
   temp(): string {
-    const t = "$" + ++this.counter;
-    this.fn.temps.push(t);
+    let t = this.fn.free.pop();
+    if (t === undefined) {
+      t = "$" + ++this.counter;
+      this.fn.temps.push(t);
+    }
+    this.fn.inUse.push(t);
     return t;
   }
   hoist(expr: string): string {
@@ -493,6 +501,15 @@ export class Emitter {
   }
 
   stmt(st: A.Stmt) {
+    const fn = this.fn;
+    const depth = fn.inUse.length;
+    this.stmtInner(st);
+    // Release this statement's temporaries (most recent first, so nested
+    // allocations come back in a stable order).
+    while (fn.inUse.length > depth) fn.free.push(fn.inUse.pop()!);
+  }
+
+  stmtInner(st: A.Stmt) {
     this.line = st.line;
     switch (st.k) {
       case "Expr":

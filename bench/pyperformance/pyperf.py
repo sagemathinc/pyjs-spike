@@ -1,7 +1,8 @@
 """A minimal stand-in for pyperf, shared by CPython and pyjs runs.
 
 bench_time_func(name, func, *args) times func(loops, *args): one cold call
-with loops=1, then five samples with loops calibrated to ~50 ms each.  It
+with loops=1, about one second of warmup, then five samples with loops
+calibrated to ~50 ms each.  It
 prints `name cold_ms warm_ms_per_loop`.
 """
 
@@ -55,5 +56,10 @@ class Runner:
         loops = 1
         if cold > 0:
             loops = max(1, min(10000, int(0.05 / cold)))
+        # Warm up for about a second (JIT compilers need it; CPython does not)
+        # before taking five samples.
+        t_end = perf_counter() + 1.0
+        while perf_counter() < t_end:
+            func(loops, *args)
         samples = sorted(func(loops, *args) / loops for _ in range(5))
         print(f"{name} {cold * 1000:.3f} {samples[2] * 1000:.3f}")
