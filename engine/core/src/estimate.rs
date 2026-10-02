@@ -11,8 +11,11 @@ pub struct Estimate {
     pub symbols: u64,
     pub dim: u64,
     pub genus: u64,
-    /// Primes needed for the exact characteristic polynomial.
+    /// Primes the exact characteristic polynomial typically needs (the
+    /// proven bound from the sum of squares, with Sato-Tate's r = sqrt(q)),
+    /// and at most (the worst-case Deligne bound).
     pub primes: u64,
+    pub primes_max: u64,
     /// Peak bytes for one prime, and for the exact computation (up to 8
     /// primes are in flight at once).
     pub bytes_modp: f64,
@@ -35,7 +38,9 @@ pub fn estimate(n: u64, q: u64) -> Estimate {
     let (psi, genus, _, eis, dim) = level_data(n);
     let (m, d) = (GENS_PER_SYMBOL * psi as f64, dim as f64);
     let h = heilbronn(q as i64).len() as f64;
-    let primes = (bound_bits(q, genus, eis) / 30.99).ceil();
+    let primes_max = (bound_bits(q, genus, eis) / 30.99).ceil();
+    let typical = genus as f64 * (1.0 + (q as f64).sqrt()).log2() + eis as f64 * (2.0 + q as f64).log2() + 2.0;
+    let primes = (typical / 30.99).ceil().min(primes_max);
     // Dense coordinates of every free generator dominate, then the matrix.
     let bytes_modp = 8.0 * m * d + 4.0 * d * d + 3e6;
     let seconds_modp = ELIM * m * d + HECKE * h * d * d + CHARPOLY * (1.0 + d / 4000.0) * d * d * d;
@@ -46,6 +51,7 @@ pub fn estimate(n: u64, q: u64) -> Estimate {
         dim,
         genus,
         primes: primes as u64,
+        primes_max: primes_max as u64,
         bytes_modp,
         bytes_exact: bytes_modp * primes.min(8.0),
         seconds_modp,

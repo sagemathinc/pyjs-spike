@@ -105,6 +105,7 @@ fn estimate<'py>(py: Python<'py>, n: u64, q: u64) -> PyResult<Bound<'py, PyDict>
     d.set_item("dim", e.dim)?;
     d.set_item("genus", e.genus)?;
     d.set_item("primes", e.primes)?;
+    d.set_item("primes_max", e.primes_max)?;
     d.set_item("bytes_modp", e.bytes_modp)?;
     d.set_item("bytes_exact", e.bytes_exact)?;
     d.set_item("seconds_modp", e.seconds_modp)?;
