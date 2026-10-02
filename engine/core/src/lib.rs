@@ -132,6 +132,40 @@ impl ModularSymbols {
         ModularSymbols { n, p, p1, rep_of, coords, basis_symbol }
     }
 
+    /// Coordinates of Manin symbol i in the quotient basis (debugging).
+    pub fn symbol_vector(&self, i: usize) -> Vec<u64> {
+        match self.rep_of[i] {
+            None => vec![0; self.dimension()],
+            Some((g, s)) => self.coords[g as usize].iter().map(|&x| if s { (self.p - x) % self.p } else { x }).collect(),
+        }
+    }
+
+    /// Check the 2- and 3-term relations hold in the quotient (debugging).
+    pub fn check_relations(&self) -> Vec<String> {
+        let p = self.p;
+        let mut bad = vec![];
+        let add = |a: &[u64], b: &[u64]| a.iter().zip(b).map(|(x, y)| (x + y) % p).collect::<Vec<u64>>();
+        for i in 0..self.p1.len() {
+            let (c, d) = self.p1.get(i);
+            let (c, d) = (c as i64, d as i64);
+            let x = self.symbol_vector(i);
+            let s = self.symbol_vector(self.p1.index(d, -c));
+            if add(&x, &s).iter().any(|&v| v != 0) {
+                bad.push(format!("S fails at {:?}", (c, d)));
+            }
+            let t1 = self.symbol_vector(self.p1.index(d, -c - d));
+            let t2 = self.symbol_vector(self.p1.index(-c - d, c));
+            if add(&add(&x, &t1), &t2).iter().any(|&v| v != 0) {
+                bad.push(format!("T fails at {:?}", (c, d)));
+            }
+        }
+        bad
+    }
+
+    pub fn basis_symbols(&self) -> &[(u32, bool)] {
+        &self.basis_symbol
+    }
+
     pub fn dimension(&self) -> usize {
         self.basis_symbol.len()
     }

@@ -14,6 +14,8 @@ fn main() {
     if std::env::var("MODSYM_DEBUG").is_ok() {
         let ms = modsym_core::ModularSymbols::new(n, p);
         let t = ms.hecke_matrix(q);
+        eprintln!("relation failures: {:?}", ms.check_relations().iter().take(5).collect::<Vec<_>>());
+        eprintln!("basis symbols: {:?}", ms.basis_symbols().iter().map(|&(i, s)| (ms.p1.get(i as usize), s)).collect::<Vec<_>>());
         eprintln!("T_{} = {:?}", q, t.iter().map(|r| r.iter().map(|&x| if x > p / 2 { x as i64 - p as i64 } else { x as i64 }).collect::<Vec<_>>()).collect::<Vec<_>>());
     }
     let r = pool.install(|| modsym_core::hecke_charpoly(n, q, p));
