@@ -1,0 +1,17 @@
+{
+  "name": "pyjs-spike",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "tsc -p . && node --test dist/test/ target/"
+  },
+  "dependencies": {
+    "tree-sitter-python": "0.25.0",
+    "web-tree-sitter": "0.25.10"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
+  }
+}

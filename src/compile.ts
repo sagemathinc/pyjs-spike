@@ -1,0 +1,77 @@
+// Compile and run Python modules.
+
+import { readFileSync, existsSync } from "fs";
+import { join, resolve as resolvePath, dirname } from "path";
+import { runInThisContext } from "vm";
+import { initParser, parse, PySyntaxError } from "./parse";
+import { analyze, SyntaxErr } from "./scope";
+import { Emitter, Compiled } from "./emit";
+import { R } from "./runtime/index";
+
+const builtinNames = new Set(Object.keys(R.builtins));
+
+export function compile(source: string, filename: string, moduleName: string): Compiled {
+  const mod = parse(source, filename);
+  try {
+    return new Emitter(analyze(mod), builtinNames, moduleName).module(mod.body);
+  } catch (e) {
+    if (e instanceof SyntaxErr) throw new PySyntaxError(e.msg, filename, e.line, mod.lines[e.line - 1] ?? "");
+    throw e;
+  }
+}
+
+function syntaxError(e: PySyntaxError): any {
+  const err = R.T.SyntaxError(e.msg);
+  err.filename = e.filename;
+  err.lineno = e.lineno;
+  err.text = e.text;
+  return err;
+}
+
+// Execute `source` as module `name`, registering it in sys.modules first.
+export function execModule(source: string, filename: string, name: string, isPackage = false): any {
+  const m = R.newModule(name);
+  m.__file__ = filename;
+  m.__package__ = isPackage ? name : name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "";
+  if (isPackage) m.__path__ = [dirname(filename)];
+  m.__builtins__ = R.builtins;
+  R.dictSet(R.sysModules, name, m);
+  let compiled: Compiled;
+  try {
+    compiled = compile(source, filename, name);
+  } catch (e) {
+    if (e instanceof PySyntaxError) throw syntaxError(e);
+    throw e;
+  }
+  const jsName = "py:" + resolvePath(filename);
+  R.scripts.set(jsName, { filename, lines: source.split("\n"), lineMap: compiled.lineMap });
+  const fn = runInThisContext(compiled.code, { filename: jsName });
+  try {
+    fn(m, R);
+  } catch (e) {
+    R.sysModules.$m.delete(name);
+    throw e;
+  }
+  return m;
+}
+
+// Import search: directories in sys.path, `name.py` or `name/__init__.py`.
+R.loader.load = (name: string) => {
+  const sys = R.importModule("sys");
+  const parts = name.split(".");
+  let dirs: string[];
+  if (parts.length > 1) {
+    const parent = R.sysModules.$m.get(parts.slice(0, -1).join("."));
+    dirs = parent?.__path__ ? R.toArray(parent.__path__) : [];
+  } else dirs = R.toArray(sys.path);
+  const leaf = parts[parts.length - 1];
+  for (const d of dirs) {
+    const pkg = join(d, leaf, "__init__.py");
+    if (existsSync(pkg)) return execModule(readFileSync(pkg, "utf8"), pkg, name, true);
+    const file = join(d, leaf + ".py");
+    if (existsSync(file)) return execModule(readFileSync(file, "utf8"), file, name);
+  }
+  return null;
+};
+
+export { initParser, R };
