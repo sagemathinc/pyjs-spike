@@ -129,6 +129,13 @@ Known gaps: set iteration order differs from CPython's hash-table order;
 `str` uses UTF-16 indexing; no `async`, metaclasses, or int/str/float
 subclasses; generator close()/throw() edge cases; `__dict__` is a snapshot.
 
+* **Real number-theory code** (`results/modsym.md`): a plain-Python
+  modular-symbols program (Gamma0(N), Hecke operators, charpoly mod p) runs
+  1.25-1.5x faster on pyjs than on CPython, 9x faster than on the old
+  sagejs runtime, and on par with Sage's own native implementation up to
+  N ~ 5000; all agree exactly with Sage.  Sage pulls ahead at N = 10007
+  through native linear algebra, which is where FLINT belongs in the stack.
+
 **Provisional answer to the question:** yes on throughput -- compiled Python
 on V8 is at parity with CPython 3.14 in steady state, and faster on numeric
 and object-heavy code.  The open risk is first-run latency on very short
