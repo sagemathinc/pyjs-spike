@@ -9,9 +9,13 @@
 //!   per-prime dimension check and a proven coefficient bound.
 //! * `estimate`: predicted dimension, time and memory before running.
 //!
+//! Invalid input (q not a prime, q | N, p out of range) is an `Err`, never a
+//! panic, so a batch over many levels reports bad entries and keeps going.
+//!
 //! With the `parallel` feature, work runs on the current rayon pool.
 
 mod par;
+pub mod estimate;
 pub mod exact;
 pub mod linalg;
 pub mod p1;
@@ -37,17 +41,19 @@ fn elapsed_ms(_: (), _: ()) -> f64 {
     0.0
 }
 
-pub struct Result {
+pub struct ModP {
     pub n: u64,
     pub q: u64,
     pub p: u64,
     pub symbols: usize,
+    /// Free generators after the 2-term relations.
+    pub gens: usize,
     pub dim: usize,
     pub charpoly: Vec<u64>,
     pub ms: [f64; 3],
 }
 
-impl Result {
+impl ModP {
     /// The same hash modsym.py prints.
     pub fn hash(&self) -> u128 {
         self.charpoly.iter().fold(0u128, |h, &c| (h * 1000003 + c as u128) % 2305843009213693951)
@@ -58,8 +64,25 @@ impl Result {
     }
 }
 
+/// Checks the arguments shared by every entry point.
+pub fn validate(n: u64, q: u64, p: Option<u64>) -> Result<(), String> {
+    if n == 0 || n > 1 << 31 {
+        return Err(format!("level N = {} out of range", n));
+    }
+    if !exact::is_prime(q) || n % q == 0 {
+        return Err(format!("q = {} must be a prime not dividing N = {}", q, n));
+    }
+    if let Some(p) = p {
+        if p < 3 || p >= 1 << 31 || !exact::is_prime(p) {
+            return Err(format!("p = {} must be an odd prime below 2^31", p));
+        }
+    }
+    Ok(())
+}
+
 /// Characteristic polynomial of T_q over GF(p) (p < 2^31).
-pub fn hecke_charpoly(n: u64, q: u64, p: u64) -> Result {
+pub fn hecke_charpoly(n: u64, q: u64, p: u64) -> Result<ModP, String> {
+    validate(n, q, Some(p))?;
     let t0 = now();
     let pres = Presentation::new(n);
     let sp = Space::new(&pres, p);
@@ -68,13 +91,15 @@ pub fn hecke_charpoly(n: u64, q: u64, p: u64) -> Result {
     let t2 = now();
     let f = linalg::charpoly(t, p);
     let t3 = now();
-    Result { n, q, p, symbols: pres.p1.len(), dim: sp.dimension(), charpoly: f, ms: [elapsed_ms(t0, t1), elapsed_ms(t1, t2), elapsed_ms(t2, t3)] }
+    Ok(ModP { n, q, p, symbols: pres.p1.len(), gens: pres.m, dim: sp.dimension(), charpoly: f, ms: [elapsed_ms(t0, t1), elapsed_ms(t1, t2), elapsed_ms(t2, t3)] })
 }
 
 /// T_q T_r == T_r T_q over GF(p): an independent consistency check.
-pub fn hecke_commute(n: u64, q: u64, r: u64, p: u64) -> bool {
+pub fn hecke_commute(n: u64, q: u64, r: u64, p: u64) -> Result<bool, String> {
+    validate(n, q, Some(p))?;
+    validate(n, r, None)?;
     let pres = Presentation::new(n);
     let sp = Space::new(&pres, p);
     let (a, b) = (sp.hecke_matrix(&pres, q), sp.hecke_matrix(&pres, r));
-    linalg::matmul(&a, &b, p) == linalg::matmul(&b, &a, p)
+    Ok(linalg::matmul(&a, &b, p) == linalg::matmul(&b, &a, p))
 }

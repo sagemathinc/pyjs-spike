@@ -22,6 +22,11 @@ fn take_value(args: &mut Vec<String>, name: &str) -> Option<String> {
     Some(v)
 }
 
+fn fail(e: &str) -> ! {
+    eprintln!("error: {}", e);
+    std::process::exit(2)
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let threads: usize = take_value(&mut args, "--threads").map_or(0, |s| s.parse().unwrap());
@@ -39,13 +44,13 @@ fn main() {
         return;
     }
     if let Some(r) = commute {
-        let ok = pool.install(|| modsym_core::hecke_commute(n, q, r, p));
+        let ok = pool.install(|| modsym_core::hecke_commute(n, q, r, p)).unwrap_or_else(|e| fail(&e));
         println!("N={} T_{} T_{} commute mod {}: {} ({:.0} ms)", n, q, r, p, ok, t.elapsed().as_secs_f64() * 1000.0);
         return;
     }
     if exact {
         match pool.install(|| modsym_core::exact::exact_charpoly(n, q)) {
-            Err(e) => eprintln!("error: {}", e),
+            Err(e) => fail(&e),
             Ok(e) => {
                 let shown: Vec<String> = e.coeffs.iter().map(|c| c.to_string()).collect();
                 let poly = if shown.len() <= 12 { shown.join(", ") } else { format!("{}, ..., {}", shown[..4].join(", "), shown[shown.len() - 4..].join(", ")) };
@@ -59,10 +64,10 @@ fn main() {
         }
         return;
     }
-    let r = pool.install(|| modsym_core::hecke_charpoly(n, q, p));
+    let r = pool.install(|| modsym_core::hecke_charpoly(n, q, p)).unwrap_or_else(|e| fail(&e));
     println!(
-        "N={} q={} p={} symbols={} dim={} eisenstein_root={} charpoly_hash={}",
-        r.n, r.q, r.p, r.symbols, r.dim, if r.eisenstein_root() { "True" } else { "False" }, r.hash()
+        "N={} q={} p={} symbols={} gens={} dim={} eisenstein_root={} charpoly_hash={}",
+        r.n, r.q, r.p, r.symbols, r.gens, r.dim, if r.eisenstein_root() { "True" } else { "False" }, r.hash()
     );
     println!(
         "times: symbols {:.0} ms, T_{} {:.0} ms, charpoly {:.0} ms, total {:.0} ms ({} threads)",

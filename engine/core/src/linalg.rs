@@ -133,8 +133,61 @@ pub fn heilbronn(q: i64) -> Vec<(i64, i64, i64, i64)> {
 /// Each step applies all row operations, then the matching column
 /// operations; the elementary transforms of one step commute, so this is
 /// the same similarity transform as the one-at-a-time version.
-pub fn charpoly(mut h: Vec<Vec<u64>>, p: u64) -> Vec<u64> {
+pub fn charpoly(h: Vec<Vec<u64>>, p: u64) -> Vec<u64> {
+    assert!(p < 1 << 31);
+    let h: Vec<Vec<u32>> = h.into_iter().map(|r| r.into_iter().map(|x| x as u32).collect()).collect();
+    charpoly_u32(h, p as u32)
+}
+
+// The leaf kernels are compiled twice, generic and with AVX2, and chosen at
+// run time (closures run by rayon do not inherit #[target_feature]).
+macro_rules! dispatch {
+    ($name:ident, $generic:ident, ($($a:ident: $t:ty),*) -> $r:ty) => {
+        #[inline]
+        fn $name($($a: $t),*) -> $r {
+            #[cfg(target_arch = "x86_64")]
+            {
+                #[target_feature(enable = "avx2")]
+                unsafe fn avx2($($a: $t),*) -> $r {
+                    $generic($($a),*)
+                }
+                if std::arch::is_x86_feature_detected!("avx2") {
+                    // SAFETY: the CPU supports AVX2.
+                    return unsafe { avx2($($a),*) };
+                }
+            }
+            $generic($($a),*)
+        }
+    };
+}
+dispatch!(sub_mul, sub_mul_generic, (x: &mut [u32], y: &[u32], w: u32, ws: u32, p: u32) -> ());
+dispatch!(dot_lazy, dot_lazy_generic, (y: &[u32], w: &[u32], ws: &[u32], p: u32) -> u64);
+dispatch!(acc_mul, acc_mul_generic, (out: &mut [u64], y: &[u32], w: u32, ws: u32, p: u32) -> ());
+
+/// x += w y elementwise mod p (w = p - u for x -= u y).
+#[inline(always)]
+fn sub_mul_generic(x: &mut [u32], y: &[u32], w: u32, ws: u32, p: u32) {
+    for (x, &y) in x.iter_mut().zip(y) {
+        let s = *x + reduce(mul_lazy(w, ws, y, p), p);
+        *x = if s >= p { s - p } else { s };
+    }
+}
+
+/// out += w y elementwise, each term in [0, 2p), without reduction.
+#[inline(always)]
+fn acc_mul_generic(out: &mut [u64], y: &[u32], w: u32, ws: u32, p: u32) {
+    for (o, &y) in out.iter_mut().zip(y) {
+        *o += mul_lazy(w, ws, y, p) as u64;
+    }
+}
+
+/// Hessenberg reduction, then the Hessenberg recurrence.  Entries are u32
+/// (p < 2^31) and every product w z mod p uses Shoup's precomputed
+/// quotient floor(w 2^32 / p), so the inner loops are divisionless and
+/// vectorize (four or eight lanes with AVX2).
+fn charpoly_u32(mut h: Vec<Vec<u32>>, p: u32) -> Vec<u64> {
     let n = h.len();
+    let pp = p as u64;
     for m in 1..n.saturating_sub(1) {
         let Some(i) = (m..n).find(|&i| h[i][m - 1] != 0) else { continue };
         if i != m {
@@ -143,55 +196,94 @@ pub fn charpoly(mut h: Vec<Vec<u64>>, p: u64) -> Vec<u64> {
                 row.swap(i, m);
             }
         }
-        let inv = powmod(h[m][m - 1], p - 2, p);
-        let u: Vec<u64> = (0..n).map(|i| if i > m { h[i][m - 1] * inv % p } else { 0 }).collect();
-        let pivot = h[m].clone();
-        par::for_each_mut(&mut h, |i, row| {
-            let ui = u[i];
-            if ui != 0 {
-                for (x, &y) in row.iter_mut().zip(&pivot) {
-                    *x = (*x + p - ui * y % p) % p;
+        let inv = powmod(h[m][m - 1] as u64, pp - 2, pp);
+        let u: Vec<u32> = (0..n).map(|i| if i > m { (h[i][m - 1] as u64 * inv % pp) as u32 } else { 0 }).collect();
+        let us: Vec<u32> = u.iter().map(|&w| shoup32(w, p)).collect();
+        // Rows below m: row_i -= u_i row_m; columns before m - 1 are zero in both.
+        let pivot = h[m][m - 1..].to_vec();
+        par::for_each_chunk_mut(&mut h[m + 1..], 8, |c, rows| {
+            for (k, row) in rows.iter_mut().enumerate() {
+                let i = m + 1 + 8 * c + k;
+                if u[i] != 0 {
+                    let w = p - u[i];
+                    sub_mul(&mut row[m - 1..], &pivot, w, shoup32(w, p), p);
                 }
             }
         });
-        par::for_each_mut(&mut h, |_, row| {
-            let mut s = row[m];
-            for i in m + 1..n {
-                if u[i] != 0 {
-                    s = (s + u[i] * row[i]) % p;
-                }
+        // Column m += sum_{i > m} u_i column_i: a dot product per row.
+        let (uu, ss) = (&u[m + 1..], &us[m + 1..]);
+        par::for_each_chunk_mut(&mut h, 8, |_, rows| {
+            for row in rows {
+                row[m] = ((row[m] as u64 + dot_lazy(&row[m + 1..], uu, ss, p)) % pp) as u32;
             }
-            row[m] = s;
         });
     }
-    let mut polys: Vec<Vec<u64>> = vec![vec![1]];
+    // polys[k] = charpoly of the leading k x k block:
+    // polys[m] = x polys[m-1] - sum_j coef_j polys[j].
+    let mut polys: Vec<Vec<u32>> = vec![vec![1]];
     for m in 1..=n {
-        // coefficients for prev = polys[m-1] and each polys[m-i-1]
-        let mut terms: Vec<(usize, u64)> = vec![(m - 1, h[m - 1][m - 1])];
+        let mut terms: Vec<(usize, u32)> = vec![(m - 1, h[m - 1][m - 1])];
         let mut t = 1u64;
         for i in 1..m {
-            t = t * h[m - i][m - i - 1] % p;
-            terms.push((m - i - 1, t * h[m - i - 1][m - 1] % p));
+            t = t * h[m - i][m - i - 1] as u64 % pp;
+            terms.push((m - i - 1, (t * h[m - i - 1][m - 1] as u64 % pp) as u32));
         }
-        let mut cur = vec![0u64; m + 1];
-        for (k, c) in polys[m - 1].iter().enumerate() {
-            cur[k + 1] = *c;
+        terms.retain(|t| t.1 != 0);
+        let mut acc = vec![0u64; m + 1];
+        for k in 1..=m {
+            acc[k] = polys[m - 1][k - 1] as u64;
         }
         let polys_ref = &polys;
-        par::for_each_mut(&mut cur, |k, x| {
-            let mut s = *x;
+        let chunk = 256;
+        par::for_each_chunk_mut(&mut acc, chunk, |c, out| {
+            let k0 = c * chunk;
             for &(j, coef) in &terms {
-                if coef != 0 {
-                    if let Some(&y) = polys_ref[j].get(k) {
-                        s = (s + p - coef * y % p) % p;
-                    }
+                let pj = &polys_ref[j];
+                if pj.len() <= k0 {
+                    continue;
                 }
+                let (w, end) = (p - coef, (pj.len() - k0).min(out.len()));
+                acc_mul(&mut out[..end], &pj[k0..k0 + end], w, shoup32(w, p), p);
             }
-            *x = s;
         });
-        polys.push(cur);
+        polys.push(acc.into_iter().map(|x| (x % pp) as u32).collect());
     }
-    polys.pop().unwrap()
+    polys.pop().unwrap().into_iter().map(|x| x as u64).collect()
+}
+
+/// floor(w 2^32 / p) for w < p.
+#[inline(always)]
+fn shoup32(w: u32, p: u32) -> u32 {
+    (((w as u64) << 32) / p as u64) as u32
+}
+
+/// w y mod p, up to one extra p: the result is in [0, 2p).
+#[inline(always)]
+fn mul_lazy(w: u32, ws: u32, y: u32, p: u32) -> u32 {
+    let q = ((ws as u64 * y as u64) >> 32) as u32;
+    w.wrapping_mul(y).wrapping_sub(q.wrapping_mul(p))
+}
+
+#[inline(always)]
+fn reduce(r: u32, p: u32) -> u32 {
+    if r >= p { r - p } else { r }
+}
+
+/// sum_k w_k y_k, each term in [0, 2p), as u64 (no overflow below 2^32 terms).
+#[inline(always)]
+fn dot_lazy_generic(y: &[u32], w: &[u32], ws: &[u32], p: u32) -> u64 {
+    let mut lanes = [0u64; 8];
+    let k8 = y.len() / 8 * 8;
+    for ((yc, wc), sc) in y[..k8].chunks_exact(8).zip(w[..k8].chunks_exact(8)).zip(ws[..k8].chunks_exact(8)) {
+        for j in 0..8 {
+            lanes[j] += mul_lazy(wc[j], sc[j], yc[j], p) as u64;
+        }
+    }
+    let mut s: u64 = lanes.iter().sum();
+    for k in k8..y.len() {
+        s += mul_lazy(w[k], ws[k], y[k], p) as u64;
+    }
+    s
 }
 
 pub fn matmul(a: &[Vec<u64>], b: &[Vec<u64>], p: u64) -> Vec<Vec<u64>> {

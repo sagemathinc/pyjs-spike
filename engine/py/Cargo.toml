@@ -10,4 +10,5 @@ crate-type = ["cdylib"]
 [dependencies]
 modsym-core = { path = "../core" }
 rayon = "1.10"
-pyo3 = { version = "0.27", features = ["extension-module"] }
+pyo3 = { version = "0.27", features = ["extension-module", "num-bigint"] }
+num-bigint = "0.4"

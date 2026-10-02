@@ -142,9 +142,7 @@ pub fn bound_bits(q: u64, genus: u64, eis: u64) -> f64 {
 }
 
 pub fn exact_charpoly(n: u64, q: u64) -> Result<Exact, String> {
-    if !is_prime(q) || n % q == 0 {
-        return Err(format!("q = {} must be a prime not dividing N = {}", q, n));
-    }
+    crate::validate(n, q, None)?;
     let (_, genus, cusps, eis, dim) = level_data(n);
     let need = bound_bits(q, genus, eis);
     let pres = Presentation::new(n);
@@ -153,9 +151,11 @@ pub fn exact_charpoly(n: u64, q: u64) -> Result<Exact, String> {
     let mut bits = 0.0;
     let mut next = 1u64 << 31;
     while bits < need {
-        // A batch of primes, computed in parallel.
+        // A batch of primes, computed in parallel: no more than are still
+        // needed (each prime adds 30.99 bits), and at most 8 for memory.
+        let want = (((need - bits) / 30.99).ceil() as usize).clamp(1, 8);
         let mut batch = vec![];
-        while batch.len() < 8 {
+        while batch.len() < want {
             next -= 1;
             if is_prime(next) {
                 batch.push(next);
@@ -179,7 +179,7 @@ pub fn exact_charpoly(n: u64, q: u64) -> Result<Exact, String> {
                 None => rejected.push(p),
             }
         }
-        if rejected.len() > 64 {
+        if rejected.len() > 16 {
             return Err(format!("too many primes with the wrong dimension (expected {})", dim));
         }
     }
@@ -228,4 +228,10 @@ fn modpow(mut b: u64, mut e: u64, m: u64) -> u64 {
     }
     b = r as u64;
     b
+}
+
+/// Exact characteristic polynomials of T_q for many levels, in parallel over
+/// levels; each entry is independent (an invalid level is an `Err`).
+pub fn batch_exact(levels: &[u64], q: u64) -> Vec<Result<Exact, String>> {
+    par::map_slice(levels, |&n| exact_charpoly(n, q))
 }
