@@ -42,6 +42,39 @@ all its lower levels. From Python, a_p for all 1,228 primes below 10^4 of
 the level-5077 newform takes 0.22 s, and they agree with point counts on
 5077a1.
 
+## Against Magma
+
+Magma 2.18-5 on the same machine (16-core AMD EPYC 7B13 dev host), with the
+standard route: `NewformDecomposition(NewSubspace(CuspidalSubspace(
+ModularSymbols(N, 2, +1))))`, keeping the dimension-1 factors and their
+a_p for p < 100 (`engine/bench/magma/newforms.m`).  The runs went one after
+another, and the cache probe read 25.4 GB/s before and after.  Both
+systems find the same numbers of rational newforms everywhere they were
+compared.
+
+| workload | Magma | Sagebrush | ratio |
+|---|---|---|---|
+| N = 389 (dim 33) | 0.12 s | 0.002 s | 60x |
+| N = 960 (dim 200, 16 newforms) | 1.57 s | 0.52 s | 3x |
+| N = 5077 (dim 423) | 3.82 s | 0.10 s | 38x |
+| N = 9240 (dim 2336, 36 newforms) | 855 s, ~1.2 GB | 92 s (one thread); 18 s, 120 MB (16 threads) | 9.3x (one core each) |
+| all levels 11..2000, one core | 1039 s CPU | 76.7 s, 17 MB | 13.5x |
+| all levels 11..2000, 16 cores | 107.9 s (16 processes, up to 76 MB each) | 6.9 s, 78 MB in total | 15.6x |
+
+Single levels are timed on one thread for both.  Sagebrush's single-level
+times include computing all the lower levels it needs for the old-part
+bookkeeping.
+
+Caveats:
+
+- Magma 2.18 dates from 2012, and a current Magma may be faster.
+- Magma's route decomposes the whole new space, non-rational newforms
+  included, which is more work than finding the rational ones. A Magma
+  expert might know a cheaper rational-only path, and that would be the
+  fairer comparison.
+- eclib, Cremona's own C++ built for exactly this table, is still the
+  benchmark to run.
+
 ## What changed in the engine on the way
 
 - **No dense coordinate table.** Measured fill-in: after sparse
