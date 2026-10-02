@@ -1,0 +1,40 @@
+# 2026-10-02T03:48:06Z 16 cpus; Python 3.14.4; node v26.10.0
+== CPython
+               cold ms   warm ms  result
+fib25              8.5       9.0  75025
+int loop         122.5     121.9  3999997
+float loop        30.8      30.6  1500.0
+method call       51.9      52.0  1000000
+poly method       72.2      72.3  22000000
+listcomp          60.2      54.9  666665333334
+dict str          56.8      50.1  19999900000
+str join          27.9      27.8  200000
+sieve              9.7       9.6  148933
+bigint fib         4.0       4.0  988094463
+nbody             95.1      96.0  -0.16908926275527172
+== target JS
+               cold ms   warm ms  result
+fib25              9.3       1.2  75025
+int loop          51.9      47.7  3999997
+float loop        11.5       9.3  1500.0
+method call        7.9       5.0  1000000
+poly method       31.7      25.5  22000000
+listcomp          46.9      26.8  666665333334
+dict str          86.9      62.8  19999900000
+str join          20.2      22.8  200000
+sieve             14.4      10.1  148933
+bigint fib         3.8       2.6  988094463
+nbody             88.5      80.4  -0.16908926275527172
+== sagejs HEAD b52dbdb73
+               cold ms   warm ms  result
+fib25             49.6      43.0  75025
+int loop         162.6     151.0  3999997
+float loop       341.0     346.8  1500.0
+method call     2304.4    2316.4  1000000
+poly method      429.5     419.0  22000000
+listcomp         104.5      94.4  666665333334
+dict str         991.1     958.0  19999900000
+str join         510.9     512.0  200000
+sieve           3617.0    3535.1  148933
+bigint fib         6.8       3.7  988094463
+nbody           2748.6    2704.9  -0.16908926275527172
