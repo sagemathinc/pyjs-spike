@@ -31,7 +31,8 @@ fn main() {
                 eprintln!("N={} dim {:>2}: traces check {}, max |w| {}, {:.1} bits per a_p", n, o.orbit.dim, o.traces_check, maxw, bits as f64 / o.c.len() as f64);
             }
             let traces: Vec<i64> = o.orbit.traces.iter().map(|x| x.1).collect();
-            writeln!(out, "{}", serde_json::json!({"level": n, "dim": o.orbit.dim, "traces": traces, "traces_check": o.traces_check, "c": o.c})).unwrap();
+            let f: Vec<String> = o.orbit.f.iter().map(|x| x.to_string()).collect();
+            writeln!(out, "{}", serde_json::json!({"level": n, "dim": o.orbit.dim, "traces": traces, "traces_check": o.traces_check, "c": o.c, "f": f, "ops": o.orbit.ops})).unwrap();
         }
     }
     eprintln!("{} levels, {} orbits, trace check failed for {}, {:.1} s", levels.len(), orbits, failed, t0.elapsed().as_secs_f64());

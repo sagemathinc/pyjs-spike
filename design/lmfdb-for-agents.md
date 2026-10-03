@@ -230,7 +230,7 @@ leave reusable evidence instead of chat transcripts.
 
 | milestone | contents | needs |
 |---|---|---|
-| **M0: local prototype** | schemas, Parquet layout, manifests, certificates; elliptic curves ($N\le 9999$) and weight-2 newforms ($N\le 1000$) from Sagebrush, cross-referenced with the LMFDB import; DuckDB queries in a notebook | nothing new |
+| **M0: local prototype** (done 2026-10-03, see `atlas/`) | schemas, Parquet layout, manifests, certificates; elliptic curves ($N\le 9999$) and weight-2 newforms ($N\le 1000$) from Sagebrush, cross-referenced with the LMFDB import; DuckDB queries in a notebook | nothing new |
 | **M1: R2 and read API** | bucket, CDN, Workers lookup API, MCP server, Python and JS clients | Cloudflare account, R2 bucket, API token as a CoCalc project secret, a domain |
 | **M2: full LMFDB mirror** | all 605 tables imported with provenance, incremental updates | about 1 TB of transfer from the mirror (to be scheduled politely with LMFDB) |
 | **M3: compute on demand** | edge WASM jobs, node queue, write-back with certificates | compute nodes |
