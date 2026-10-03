@@ -8,6 +8,8 @@
 //! * `exact`: characteristic polynomials over Z by CRT over primes with a
 //!   per-prime dimension check and a proven coefficient bound.
 //! * `estimate`: predicted dimension, time and memory before running.
+//! * `general`: any weight k >= 2, Dirichlet character and sign, over
+//!   GF(ell) with ell = 1 mod ord(eps); validated against Sage.
 //!
 //! Invalid input (q not a prime, q | N, p out of range) is an `Err`, never a
 //! panic, so a batch over many levels reports bad entries and keeps going.
@@ -18,6 +20,7 @@ mod par;
 pub mod estimate;
 pub mod cusps;
 pub mod exact;
+pub mod general;
 pub mod integral;
 pub mod linalg;
 pub mod newforms;

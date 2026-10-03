@@ -55,6 +55,53 @@ pub fn normalize(n: u64, u: u64, v: u64) -> Option<(u64, u64)> {
     Some((g, v))
 }
 
+/// Like `normalize`, but also returns a unit lambda with
+/// (u', v') = lambda (u, v) mod N (as in Sage's p1_normalize, which returns
+/// its inverse).  Needed for modular symbols with a character, where
+/// [P, (lambda c, lambda d)] = eps(lambda) [P, (c, d)].
+pub fn normalize_with_scalar(n: u64, u: u64, v: u64) -> Option<(u64, u64, u64)> {
+    if n == 1 {
+        return Some((0, 1, 0));
+    }
+    let (u, v) = (u % n, v % n);
+    if u == 0 {
+        if gcd(v, n) != 1 {
+            return None;
+        }
+        let (_, inv) = xgcd(v as i64, n as i64);
+        return Some((0, 1, inv.rem_euclid(n as i64) as u64));
+    }
+    let (g, s) = xgcd(u as i64, n as i64);
+    let g = g as u64;
+    let mut s = s.rem_euclid(n as i64) as u64;
+    if gcd(g, v) != 1 {
+        return None;
+    }
+    if g != 1 {
+        let d = n / g;
+        while gcd(s, n) != 1 {
+            s = (s + d) % n;
+        }
+    }
+    let mut v = (s as u128 * v as u128 % n as u128) as u64;
+    let mut min_t = 1u64;
+    if g != 1 {
+        let ng = n / g;
+        let vng = (v as u128 * ng as u128 % n as u128) as u64;
+        let (mut t, mut min_v) = (1u64, v);
+        for _ in 2..=g {
+            v = (v + vng) % n;
+            t = (t + ng) % n;
+            if v < min_v && gcd(t, n) == 1 {
+                min_v = v;
+                min_t = t;
+            }
+        }
+        v = min_v;
+    }
+    Some((g, v, (s as u128 * min_t as u128 % n as u128) as u64))
+}
+
 pub struct P1List {
     n: u64,
     list: Vec<(u32, u32)>,
@@ -104,6 +151,20 @@ impl P1List {
         }
         self.tables[self.div_pos[u as usize] as usize][v as usize] as usize
     }
+
+    /// Index of (c:d) and the unit lambda with (u', v') = lambda (c, d).
+    pub fn index_scalar(&self, c: i64, d: i64) -> (usize, u64) {
+        let n = self.n as i64;
+        let (u, v, lambda) = normalize_with_scalar(self.n, c.rem_euclid(n) as u64, d.rem_euclid(n) as u64).expect("not in P^1(Z/NZ)");
+        if u == 0 {
+            return (self.zero_index as usize, lambda);
+        }
+        (self.tables[self.div_pos[u as usize] as usize][v as usize] as usize, lambda)
+    }
+
+    pub fn level(&self) -> u64 {
+        self.n
+    }
 }
 
 #[cfg(test)]
@@ -150,6 +211,27 @@ mod tests {
                     let (u, v) = p1.get(p1.index(c as i64, d as i64));
                     let ok = (0..n.max(1)).any(|l| gcd(l, n) == 1 && (l * u) % n == c % n && (l * v) % n == d % n);
                     assert!(ok, "N={} (c,d)=({},{}) -> ({},{})", n, c, d, u, v);
+                }
+            }
+        }
+    }
+
+    /// The scalar from normalize_with_scalar really maps (c, d) to the
+    /// canonical representative, and agrees with normalize.
+    #[test]
+    fn normalization_scalar() {
+        for n in 1..60u64 {
+            for c in 0..n {
+                for d in 0..n {
+                    let a = normalize(n, c, d);
+                    let b = normalize_with_scalar(n, c, d);
+                    assert_eq!(a, b.map(|(u, v, _)| (u, v)), "N={} ({},{})", n, c, d);
+                    if let Some((u, v, l)) = b {
+                        if n > 1 {
+                            assert_eq!(gcd(l, n), 1);
+                            assert_eq!(((l * c) % n, (l * d) % n), (u, v), "N={} ({},{})", n, c, d);
+                        }
+                    }
                 }
             }
         }
